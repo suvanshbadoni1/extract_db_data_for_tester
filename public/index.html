@@ -1,0 +1,700 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multi-Database Transaction Search System</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            padding: 20px;
+        }
+
+        .main-container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        /* Header Card */
+        .header-card {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+            margin-bottom: 30px;
+        }
+
+        .header-gradient {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header-gradient h1 {
+            font-size: 2rem;
+            margin-bottom: 10px;
+        }
+
+        .search-section {
+            padding: 30px;
+        }
+
+        /* Form Styles */
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-label {
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+
+        .form-control {
+            border-radius: 10px;
+            border: 2px solid #e0e0e0;
+            padding: 12px 15px;
+            transition: all 0.3s;
+            font-size: 14px;
+        }
+
+        .form-control:focus {
+            border-color: #667eea;
+            box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+        }
+
+        .btn-search {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            padding: 12px 40px;
+            border-radius: 10px;
+            font-weight: 600;
+            font-size: 16px;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .btn-search:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+
+        .btn-search:disabled {
+            opacity: 0.7;
+            cursor: not-allowed;
+        }
+
+        /* Status Badges */
+        .status-badge {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1000;
+            display: flex;
+            gap: 10px;
+        }
+
+        .status-badge .badge {
+            padding: 8px 15px;
+            font-size: 12px;
+            border-radius: 20px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+
+        /* Result Cards */
+        .results-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 25px;
+            margin-top: 20px;
+        }
+
+        .result-card {
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+            overflow: hidden;
+            transition: transform 0.3s, box-shadow 0.3s;
+            animation: fadeInUp 0.5s ease-out;
+            height: fit-content;
+        }
+
+        .result-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+        }
+
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .card-header {
+            padding: 15px 20px;
+            color: white;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .card-header.prm { background: linear-gradient(135deg, #0d6efd, #0056b3); }
+        .card-header.upf { background: linear-gradient(135deg, #198754, #0a5c2e); }
+        .card-header.eps { background: linear-gradient(135deg, #6f42c1, #5a2d8c); }
+
+        .card-header h3 {
+            margin: 0;
+            font-size: 1.1rem;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .badge-count {
+            background: rgba(255,255,255,0.3);
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+        }
+
+        .card-body {
+            padding: 20px;
+            max-height: 500px;
+            overflow-y: auto;
+        }
+
+        /* Loading Spinner */
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.7);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 2000;
+            flex-direction: column;
+        }
+
+        .loading-overlay.active {
+            display: flex;
+        }
+
+        .loading-spinner {
+            width: 60px;
+            height: 60px;
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .loading-text {
+            color: white;
+            margin-top: 20px;
+            font-size: 16px;
+        }
+
+        /* Table Styles */
+        .table-responsive {
+            margin-top: 10px;
+        }
+
+        .table {
+            font-size: 12px;
+            margin-bottom: 0;
+        }
+
+        .table th {
+            background: #f8f9fa;
+            position: sticky;
+            top: 0;
+            font-weight: 600;
+        }
+
+        .json-viewer {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 15px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            overflow-x: auto;
+        }
+
+        .error-message {
+            border-left: 4px solid #dc3545;
+            background: #f8d7da;
+            padding: 15px;
+            border-radius: 8px;
+        }
+
+        .info-message {
+            border-left: 4px solid #0d6efd;
+            background: #e7f3ff;
+            padding: 15px;
+            border-radius: 8px;
+        }
+
+        /* Summary Bar */
+        .summary-bar {
+            background: white;
+            border-radius: 10px;
+            padding: 15px 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        /* Empty State */
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+        }
+
+        .empty-state i {
+            font-size: 48px;
+            margin-bottom: 15px;
+            opacity: 0.5;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .results-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .status-badge {
+                position: static;
+                justify-content: center;
+                margin-bottom: 15px;
+                flex-wrap: wrap;
+            }
+            
+            .header-gradient h1 {
+                font-size: 1.5rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Loading Overlay -->
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-spinner"></div>
+        <div class="loading-text">Searching across all databases...</div>
+    </div>
+
+    <!-- Status Badges -->
+    <div class="status-badge" id="statusBadge">
+        <span class="badge bg-secondary" id="prmStatus">
+            <i class="fas fa-database"></i> PRM: Checking...
+        </span>
+        <span class="badge bg-secondary" id="upfStatus">
+            <i class="fas fa-cloud"></i> UPF: Checking...
+        </span>
+        <span class="badge bg-secondary" id="epsStatus">
+            <i class="fas fa-server"></i> EPS: Checking...
+        </span>
+    </div>
+
+    <div class="main-container">
+        <!-- Header Card -->
+        <div class="header-card">
+            <div class="header-gradient">
+                <h1><i class="fas fa-search"></i> Multi-Database Transaction Search</h1>
+                <p class="mb-0">Search across PRM (MSSQL), UPF (Oracle), and EPS PTLF (Oracle) databases</p>
+            </div>
+            <div class="search-section">
+                <form id="searchForm">
+                    <div class="row">
+                        <div class="col-md-4">
+                            <div class="form-group">
+                                <label class="form-label">
+                                    <i class="fas fa-credit-card"></i> PAN Number <span class="text-danger">*</span>
+                                </label>
+                                <input type="text" class="form-control" id="pan" 
+                                       placeholder="Enter 16-digit PAN number" required 
+                                       maxlength="16" pattern="\d{16}">
+                                <small class="text-muted">16 digits numeric only</small>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="form-group">
+                                <label class="form-label">
+                                    <i class="fas fa-hashtag"></i> RRN <span class="text-danger">*</span>
+                                </label>
+                                <input type="text" class="form-control" id="rrn" 
+                                       placeholder="Enter RRN" required maxlength="12">
+                                <small class="text-muted">6-12 digits numeric</small>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="form-group">
+                                <label class="form-label">
+                                    <i class="fas fa-code"></i> STAN <span class="text-danger">*</span>
+                                </label>
+                                <input type="text" class="form-control" id="stan" 
+                                       placeholder="Enter STAN" required maxlength="6">
+                                <small class="text-muted">6 digits numeric</small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="text-center mt-4">
+                        <button type="submit" class="btn btn-search text-white" id="searchBtn">
+                            <i class="fas fa-search"></i> Search Transactions
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary ms-2" id="clearBtn">
+                            <i class="fas fa-eraser"></i> Clear Results
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Results Section - Always visible with 3 boxes -->
+        <div class="results-grid" id="resultsGrid">
+            <!-- PRM Card -->
+            <div class="result-card" id="prmCard">
+                <div class="card-header prm" data-bs-toggle="collapse" data-bs-target="#prmBody" style="cursor: pointer;">
+                    <h3>
+                        <i class="fas fa-database"></i>
+                        PRM Database (MSSQL)
+                        <span class="badge-count" id="prmCount">Ready</span>
+                    </h3>
+                    <i class="fas fa-chevron-down"></i>
+                </div>
+                <div class="collapse show" id="prmBody">
+                    <div class="card-body" id="prmContent">
+                        <div class="info-message">
+                            <i class="fas fa-info-circle"></i>
+                            <strong>Ready to search</strong><br>
+                            Enter PAN, RRN, and STAN above and click Search
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- UPF Card -->
+            <div class="result-card" id="upfCard">
+                <div class="card-header upf" data-bs-toggle="collapse" data-bs-target="#upfBody" style="cursor: pointer;">
+                    <h3>
+                        <i class="fas fa-cloud"></i>
+                        UPF Database (Oracle 1)
+                        <span class="badge-count" id="upfCount">Ready</span>
+                    </h3>
+                    <i class="fas fa-chevron-down"></i>
+                </div>
+                <div class="collapse show" id="upfBody">
+                    <div class="card-body" id="upfContent">
+                        <div class="info-message">
+                            <i class="fas fa-info-circle"></i>
+                            <strong>Ready to search</strong><br>
+                            Enter PAN, RRN, and STAN above and click Search
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- EPS Card -->
+            <div class="result-card" id="epsCard">
+                <div class="card-header eps" data-bs-toggle="collapse" data-bs-target="#epsBody" style="cursor: pointer;">
+                    <h3>
+                        <i class="fas fa-server"></i>
+                        EPS PTLF Database (Oracle 2)
+                        <span class="badge-count" id="epsCount">Ready</span>
+                    </h3>
+                    <i class="fas fa-chevron-down"></i>
+                </div>
+                <div class="collapse show" id="epsBody">
+                    <div class="card-body" id="epsContent">
+                        <div class="info-message">
+                            <i class="fas fa-info-circle"></i>
+                            <strong>Ready to search</strong><br>
+                            Enter PAN, RRN, and STAN above and click Search
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <script>
+        const API_BASE = 'http://localhost:3000/api';
+        
+        // Check database health on load
+        async function checkHealth() {
+            try {
+                const response = await fetch(`${API_BASE}/health`);
+                const health = await response.json();
+                
+                updateStatusBadge('prmStatus', health.prm, 'PRM');
+                updateStatusBadge('upfStatus', health.upf, 'UPF');
+                updateStatusBadge('epsStatus', health.eps, 'EPS');
+            } catch (error) {
+                console.error('Health check failed:', error);
+                updateStatusBadge('prmStatus', false, 'PRM');
+                updateStatusBadge('upfStatus', false, 'UPF');
+                updateStatusBadge('epsStatus', false, 'EPS');
+            }
+        }
+        
+        function updateStatusBadge(elementId, isConnected, dbName) {
+            const badge = document.getElementById(elementId);
+            if (isConnected) {
+                badge.className = 'badge bg-success';
+                badge.innerHTML = `<i class="fas fa-check-circle"></i> ${dbName}: Online`;
+            } else {
+                badge.className = 'badge bg-danger';
+                badge.innerHTML = `<i class="fas fa-exclamation-circle"></i> ${dbName}: Offline`;
+            }
+        }
+        
+        // Format data as table
+        function formatAsTable(data) {
+            if (!data || data.length === 0) return null;
+            
+            const columns = Object.keys(data[0]);
+            let table = '<div class="table-responsive"><table class="table table-sm table-bordered table-hover">';
+            table += '<thead><tr>';
+            columns.forEach(col => {
+                table += `<th>${col.toUpperCase()}</th>`;
+            });
+            table += '</tr></thead><tbody>';
+            
+            data.forEach(row => {
+                table += '<tr>';
+                columns.forEach(col => {
+                    let value = row[col];
+                    if (value === null || value === undefined) value = '-';
+                    if (typeof value === 'object') value = JSON.stringify(value);
+                    table += `<td style="max-width: 200px; word-wrap: break-word;">${value}</td>`;
+                });
+                table += '</tr>';
+            });
+            table += '</tbody></table></div>';
+            
+            return table;
+        }
+        
+        // Update card content
+        function updateCardContent(cardId, contentId, countId, result) {
+            const contentDiv = document.getElementById(contentId);
+            const countSpan = document.getElementById(countId);
+            
+            if (!result.success) {
+                countSpan.innerHTML = 'Error';
+                countSpan.style.background = '#dc3545';
+                
+                let errorHtml = `
+                    <div class="error-message">
+                        <i class="fas fa-exclamation-circle"></i>
+                        <strong>Error:</strong><br>
+                        ${result.error || 'Unknown error occurred'}
+                    </div>
+                `;
+                
+                if (result.connectionError) {
+                    errorHtml = `
+                        <div class="error-message">
+                            <i class="fas fa-plug"></i>
+                            <strong>Connection Error:</strong><br>
+                            ${result.error}<br><br>
+                            <small>Please check your database configuration and ensure the database server is running.</small>
+                        </div>
+                    `;
+                }
+                
+                contentDiv.innerHTML = errorHtml;
+                return;
+            }
+            
+            if (result.data && result.data.length > 0) {
+                const recordCount = result.data.length;
+                countSpan.innerHTML = `${recordCount} Record${recordCount > 1 ? 's' : ''}`;
+                countSpan.style.background = 'rgba(255,255,255,0.3)';
+                
+                const tableHtml = formatAsTable(result.data);
+                contentDiv.innerHTML = `
+                    <div style="margin-bottom: 10px;">
+                        <strong><i class="fas fa-chart-line"></i> Total Records Found:</strong> ${recordCount}
+                    </div>
+                    ${tableHtml}
+                `;
+            } else {
+                countSpan.innerHTML = 'No Data';
+                countSpan.style.background = 'rgba(255,255,255,0.3)';
+                contentDiv.innerHTML = `
+                    <div class="info-message">
+                        <i class="fas fa-search"></i>
+                        <strong>No records found</strong><br>
+                        No matching transactions found for the provided PAN, RRN, and STAN.
+                    </div>
+                `;
+            }
+        }
+        
+        // Search all databases
+        async function searchAllDatabases(pan, rrn, stan) {
+            const endpoints = [
+                { name: 'prm', endpoint: '/prm/query' },
+                { name: 'upf', endpoint: '/upf/query' },
+                { name: 'eps', endpoint: '/eps/query' }
+            ];
+            
+            const results = {};
+            
+            for (const ep of endpoints) {
+                try {
+                    const response = await fetch(`${API_BASE}${ep.endpoint}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ pan, rrn, stan })
+                    });
+                    results[ep.name] = await response.json();
+                } catch (error) {
+                    results[ep.name] = {
+                        success: false,
+                        error: `Network error: ${error.message}`,
+                        data: []
+                    };
+                }
+            }
+            
+            return results;
+        }
+        
+        // Handle form submission
+        document.getElementById('searchForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const pan = document.getElementById('pan').value.trim();
+            const rrn = document.getElementById('rrn').value.trim();
+            const stan = document.getElementById('stan').value.trim();
+            
+            // Validation
+            if (!pan || !rrn || !stan) {
+                alert('Please fill in all fields: PAN, RRN, and STAN');
+                return;
+            }
+            
+            if (!/^\d{16}$/.test(pan)) {
+                alert('PAN must be exactly 16 digits');
+                return;
+            }
+            
+            if (!/^\d{6,12}$/.test(rrn)) {
+                alert('RRN must be 6-12 digits');
+                return;
+            }
+            
+            if (!/^\d{6}$/.test(stan)) {
+                alert('STAN must be exactly 6 digits');
+                return;
+            }
+            
+            // Show loading
+            const loadingOverlay = document.getElementById('loadingOverlay');
+            const searchBtn = document.getElementById('searchBtn');
+            loadingOverlay.classList.add('active');
+            searchBtn.disabled = true;
+            searchBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Searching...';
+            
+            try {
+                const results = await searchAllDatabases(pan, rrn, stan);
+                
+                // Update each card
+                updateCardContent('prmCard', 'prmContent', 'prmCount', results.prm);
+                updateCardContent('upfCard', 'upfContent', 'upfCount', results.upf);
+                updateCardContent('epsCard', 'epsContent', 'epsCount', results.eps);
+                
+                // Scroll to results
+                document.getElementById('resultsGrid').scrollIntoView({ behavior: 'smooth', block: 'start' });
+                
+            } catch (error) {
+                console.error('Search error:', error);
+                alert('Failed to perform search. Please check if the server is running.');
+            } finally {
+                loadingOverlay.classList.remove('active');
+                searchBtn.disabled = false;
+                searchBtn.innerHTML = '<i class="fas fa-search"></i> Search Transactions';
+            }
+        });
+        
+        // Clear results
+        document.getElementById('clearBtn').addEventListener('click', () => {
+            // Clear input fields
+            document.getElementById('pan').value = '';
+            document.getElementById('rrn').value = '';
+            document.getElementById('stan').value = '';
+            
+            // Reset all cards to empty state
+            const emptyMessage = `
+                <div class="info-message">
+                    <i class="fas fa-info-circle"></i>
+                    <strong>Ready to search</strong><br>
+                    Enter PAN, RRN, and STAN above and click Search
+                </div>
+            `;
+            
+            document.getElementById('prmContent').innerHTML = emptyMessage;
+            document.getElementById('upfContent').innerHTML = emptyMessage;
+            document.getElementById('epsContent').innerHTML = emptyMessage;
+            
+            document.getElementById('prmCount').innerHTML = 'Ready';
+            document.getElementById('upfCount').innerHTML = 'Ready';
+            document.getElementById('epsCount').innerHTML = 'Ready';
+        });
+        
+        // Input formatting
+        document.getElementById('pan').addEventListener('input', (e) => {
+            e.target.value = e.target.value.replace(/\D/g, '').slice(0, 16);
+        });
+        
+        document.getElementById('rrn').addEventListener('input', (e) => {
+            e.target.value = e.target.value.replace(/\D/g, '').slice(0, 12);
+        });
+        
+        document.getElementById('stan').addEventListener('input', (e) => {
+            e.target.value = e.target.value.replace(/\D/g, '').slice(0, 6);
+        });
+        
+        // Check health on load and every 30 seconds
+        checkHealth();
+        setInterval(checkHealth, 30000);
+        
+        // Keyboard shortcut: Ctrl+Enter to search
+        document.addEventListener('keydown', (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                document.getElementById('searchForm').dispatchEvent(new Event('submit'));
+            }
+        });
+    </script>
+</body>
+</html>
