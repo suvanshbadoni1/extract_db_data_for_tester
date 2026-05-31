@@ -299,6 +299,13 @@
             font-size: 16px;
         }
 
+        .date-range-group {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 15px;
+            margin-top: 10px;
+        }
+
         @media (max-width: 768px) {
             .results-grid {
                 grid-template-columns: 1fr;
@@ -365,6 +372,29 @@
                             </div>
                         </div>
                     </div>
+                    
+                    <!-- Date Range Section -->
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="form-group">
+                                <label class="form-label">
+                                    <i class="fas fa-calendar-alt"></i> Date From (DD_APDATE for PRM / LAST_MODIFIED for UPF)
+                                </label>
+                                <input type="datetime-local" class="form-control" id="dateFrom">
+                                <small class="text-muted">Start date and time (UTC format)</small>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="form-group">
+                                <label class="form-label">
+                                    <i class="fas fa-calendar-alt"></i> Date To
+                                </label>
+                                <input type="datetime-local" class="form-control" id="dateTo">
+                                <small class="text-muted">End date and time (UTC format)</small>
+                            </div>
+                        </div>
+                    </div>
+                    
                     <div class="text-center mt-4">
                         <button type="submit" class="btn btn-search" id="searchBtn">
                             <i class="fas fa-search"></i> Search Transactions
@@ -374,9 +404,16 @@
                         </button>
                     </div>
                 </form>
+                
                 <div class="alert alert-info mt-3 mb-0">
                     <i class="fas fa-info-circle"></i> 
-                    <strong>Note:</strong> PRM database searches by PAN and RRN only. STAN is used only for UPF and EPS databases.
+                    <strong>Search Notes:</strong>
+                    <ul class="mb-0 mt-1">
+                        <li><strong>PRM Database:</strong> Searches by PAN, RRN, and Date Range (using <code>DD_APDATE</code> column)</li>
+                        <li><strong>UPF Database:</strong> Searches by STAN, RRN, PAN (masked), and Date Range (using <code>LAST_MODIFIED</code> column)</li>
+                        <li><strong>EPS Database:</strong> Searches by PAN, RRN, and STAN</li>
+                        <li>Date format: YYYY-MM-DDTHH:mm (e.g., 2026-05-28T11:39)</li>
+                    </ul>
                 </div>
             </div>
         </div>
@@ -387,7 +424,7 @@
                 <div class="card-header prm" data-bs-toggle="collapse" data-bs-target="#prmBody">
                     <h3>
                         <i class="fas fa-database"></i>
-                        PRM Database (MSSQL)
+                        PRM Database (MSSQL) - DD_APDATE
                         <span class="badge-count" id="prmCount">Ready</span>
                     </h3>
                     <i class="fas fa-chevron-down"></i>
@@ -397,7 +434,7 @@
                         <div class="info-message">
                             <i class="fas fa-info-circle"></i>
                             <strong>Ready to search</strong><br>
-                            Enter PAN or RRN above and click Search (STAN is not used for PRM)
+                            Enter PAN, RRN, or Date Range above and click Search
                         </div>
                     </div>
                 </div>
@@ -408,7 +445,7 @@
                 <div class="card-header upf" data-bs-toggle="collapse" data-bs-target="#upfBody">
                     <h3>
                         <i class="fas fa-cloud"></i>
-                        UPF Database (Oracle) - ep_log
+                        UPF Database (Oracle) - LAST_MODIFIED
                         <span class="badge-count" id="upfCount">Ready</span>
                     </h3>
                     <i class="fas fa-chevron-down"></i>
@@ -418,7 +455,7 @@
                         <div class="info-message">
                             <i class="fas fa-info-circle"></i>
                             <strong>Ready to search</strong><br>
-                            Enter PAN, RRN, or STAN above and click Search
+                            Enter STAN, RRN, PAN, or Date Range above and click Search
                         </div>
                     </div>
                 </div>
@@ -510,9 +547,9 @@
                     }
                     table += `<td style="max-width: 300px; word-wrap: break-word;">${value}</td>`;
                 });
-                table += '</tr>';
+                table += '<tr>';
             });
-            table += '</tbody></table></div>';
+            table += '</tbody>\\n</div>';
             
             return table;
         }
@@ -552,7 +589,7 @@
         }
         
         // Search all databases
-        async function searchAllDatabases(pan, rrn, stan) {
+        async function searchAllDatabases(pan, rrn, stan, dateFrom, dateTo) {
             const endpoints = [
                 { name: 'prm', endpoint: '/prm/query' },
                 { name: 'upf', endpoint: '/upf/query' },
@@ -563,11 +600,16 @@
             
             for (const ep of endpoints) {
                 try {
-                    let body = { pan, rrn, stan };
+                    let body = { pan, rrn, stan, dateFrom, dateTo };
                     
-                    // For PRM, remove STAN as it's not used
+                    // For PRM, remove STAN (not used)
                     if (ep.name === 'prm') {
-                        body = { pan, rrn };
+                        body = { pan, rrn, dateFrom, dateTo };
+                    }
+                    
+                    // For EPS, remove date range (if not supported)
+                    if (ep.name === 'eps') {
+                        body = { pan, rrn, stan };
                     }
                     
                     const response = await fetch(`${API_BASE}${ep.endpoint}`, {
@@ -634,10 +676,20 @@
             const pan = document.getElementById('pan').value.trim();
             const rrn = document.getElementById('rrn').value.trim();
             const stan = document.getElementById('stan').value.trim();
+            let dateFrom = document.getElementById('dateFrom').value;
+            let dateTo = document.getElementById('dateTo').value;
             
-            if (!pan && !rrn && !stan) {
-                alert('Please enter at least one search criteria (PAN, RRN, or STAN)');
+            if (!pan && !rrn && !stan && !dateFrom && !dateTo) {
+                alert('Please enter at least one search criteria (PAN, RRN, STAN, or Date Range)');
                 return;
+            }
+            
+            // Convert dates to ISO format
+            if (dateFrom) {
+                dateFrom = new Date(dateFrom).toISOString();
+            }
+            if (dateTo) {
+                dateTo = new Date(dateTo).toISOString();
             }
             
             // Show loading
@@ -648,7 +700,7 @@
             searchBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Searching...';
             
             try {
-                const results = await searchAllDatabases(pan, rrn, stan);
+                const results = await searchAllDatabases(pan, rrn, stan, dateFrom, dateTo);
                 
                 // Update each card
                 updateCardResult('prmCard', 'prmContent', 'prmCount', results.prm);
@@ -673,24 +725,18 @@
             document.getElementById('pan').value = '';
             document.getElementById('rrn').value = '';
             document.getElementById('stan').value = '';
+            document.getElementById('dateFrom').value = '';
+            document.getElementById('dateTo').value = '';
             
             const emptyMessage = `
                 <div class="info-message">
                     <i class="fas fa-info-circle"></i>
                     <strong>Ready to search</strong><br>
-                    Enter PAN, RRN, or STAN above and click Search
+                    Enter search criteria above and click Search
                 </div>
             `;
             
-            const prmEmptyMessage = `
-                <div class="info-message">
-                    <i class="fas fa-info-circle"></i>
-                    <strong>Ready to search</strong><br>
-                    Enter PAN or RRN above and click Search (STAN is not used for PRM)
-                </div>
-            `;
-            
-            document.getElementById('prmContent').innerHTML = prmEmptyMessage;
+            document.getElementById('prmContent').innerHTML = emptyMessage;
             document.getElementById('upfContent').innerHTML = emptyMessage;
             document.getElementById('epsContent').innerHTML = emptyMessage;
             
@@ -711,6 +757,19 @@
         document.getElementById('stan').addEventListener('input', (e) => {
             e.target.value = e.target.value.replace(/\D/g, '').slice(0, 6);
         });
+        
+        // Set default date range (last 7 days)
+        function setDefaultDateRange() {
+            const to = new Date();
+            const from = new Date();
+            from.setDate(from.getDate() - 7);
+            
+            document.getElementById('dateFrom').value = from.toISOString().slice(0, 16);
+            document.getElementById('dateTo').value = to.toISOString().slice(0, 16);
+        }
+        
+        // Optional: Uncomment to set default date range
+        // setDefaultDateRange();
         
         // Check health on load and every 30 seconds
         checkHealth();
