@@ -254,6 +254,13 @@
             border-radius: 8px;
         }
 
+        .warning-message {
+            border-left: 4px solid #ffc107;
+            background: #fff3cd;
+            padding: 15px;
+            border-radius: 8px;
+        }
+
         .loading-overlay {
             position: fixed;
             top: 0;
@@ -354,7 +361,7 @@
                                 </label>
                                 <input type="text" class="form-control" id="stan" 
                                        placeholder="Enter STAN (e.g., 000105)">
-                                <small class="text-muted">System Trace Audit Number</small>
+                                <small class="text-muted">System Trace Audit Number (UPF & EPS only)</small>
                             </div>
                         </div>
                     </div>
@@ -367,6 +374,10 @@
                         </button>
                     </div>
                 </form>
+                <div class="alert alert-info mt-3 mb-0">
+                    <i class="fas fa-info-circle"></i> 
+                    <strong>Note:</strong> PRM database searches by PAN and RRN only. STAN is used only for UPF and EPS databases.
+                </div>
             </div>
         </div>
 
@@ -386,7 +397,7 @@
                         <div class="info-message">
                             <i class="fas fa-info-circle"></i>
                             <strong>Ready to search</strong><br>
-                            Enter PAN, RRN, or STAN above and click Search
+                            Enter PAN or RRN above and click Search (STAN is not used for PRM)
                         </div>
                     </div>
                 </div>
@@ -552,10 +563,17 @@
             
             for (const ep of endpoints) {
                 try {
+                    let body = { pan, rrn, stan };
+                    
+                    // For PRM, remove STAN as it's not used
+                    if (ep.name === 'prm') {
+                        body = { pan, rrn };
+                    }
+                    
                     const response = await fetch(`${API_BASE}${ep.endpoint}`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ pan, rrn, stan })
+                        body: JSON.stringify(body)
                     });
                     results[ep.name] = await response.json();
                 } catch (error) {
@@ -664,7 +682,15 @@
                 </div>
             `;
             
-            document.getElementById('prmContent').innerHTML = emptyMessage;
+            const prmEmptyMessage = `
+                <div class="info-message">
+                    <i class="fas fa-info-circle"></i>
+                    <strong>Ready to search</strong><br>
+                    Enter PAN or RRN above and click Search (STAN is not used for PRM)
+                </div>
+            `;
+            
+            document.getElementById('prmContent').innerHTML = prmEmptyMessage;
             document.getElementById('upfContent').innerHTML = emptyMessage;
             document.getElementById('epsContent').innerHTML = emptyMessage;
             

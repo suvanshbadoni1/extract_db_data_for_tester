@@ -9,12 +9,13 @@ const fs = require('fs');
 const app = express();
 const port = process.env.PORT || 3000;
 
-// Create logs directory
+// Create logs directory if it doesn't exist
 const logsDir = './logs';
 if (!fs.existsSync(logsDir)) {
     fs.mkdirSync(logsDir);
 }
 
+// Simple logging function
 function logToFile(message) {
     const timestamp = new Date().toISOString();
     const logMessage = `${timestamp} - ${message}\n`;
@@ -22,6 +23,7 @@ function logToFile(message) {
     console.log(message);
 }
 
+// Middleware
 app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
@@ -172,6 +174,7 @@ async function initializeDatabases() {
         oracle2Pool = null;
     }
     
+    // Summary
     logToFile('\n📊 Connection Summary:');
     logToFile(`   PRM (MSSQL): ${connectionStatus.prm ? '🟢 Online' : '🔴 Offline'}`);
     logToFile(`   UPF (Oracle): ${connectionStatus.upf ? '🟢 Online' : '🔴 Offline'}`);
@@ -198,9 +201,9 @@ function formatJSONData(jsonString) {
     }
 }
 
-// PRM Query endpoint - Uses PAN only (no RRN, no STAN), uses DD_APDATE for date range
+// PRM Query endpoint - STAN REMOVED (only PAN and RRN)
 app.post('/api/prm/query', async (req, res) => {
-    const { pan, dateFrom, dateTo } = req.body;
+    const { pan, rrn } = req.body;  // STAN REMOVED FROM HERE
     
     if (!mssqlPool || !connectionStatus.prm) {
         return res.json({
@@ -218,27 +221,19 @@ app.post('/api/prm/query', async (req, res) => {
         let query = `SELECT * FROM [PRMNRT].[dbo].[DETAIL] WHERE 1=1`;
         const request = mssqlPool.request();
         
-        // Add PAN condition (only if provided)
         if (pan && pan.trim()) {
             query += ` AND sd_pan = @pan`;
             request.input('pan', sql.VarChar, pan);
         }
         
-        // Add date range using DD_APDATE column
-        if (dateFrom && dateFrom.trim()) {
-            query += ` AND DD_APDATE >= @dateFrom`;
-            request.input('dateFrom', sql.DateTime, new Date(dateFrom));
+        if (rrn && rrn.trim()) {
+            query += ` AND SD_REF_NUM = @rrn`;
+            request.input('rrn', sql.VarChar, rrn);
         }
         
-        if (dateTo && dateTo.trim()) {
-            query += ` AND DD_APDATE <= @dateTo`;
-            request.input('dateTo', sql.DateTime, new Date(dateTo));
-        }
+        // STAN condition COMPLETELY REMOVED
         
-        // Add order by date
-        query += ` ORDER BY DD_APDATE DESC`;
-        
-        logToFile(`PRM Query - PAN: ${pan || 'NOT PROVIDED'}, DateFrom: ${dateFrom || 'NOT PROVIDED'}, DateTo: ${dateTo || 'NOT PROVIDED'}`);
+        logToFile(`PRM Query - PAN: ${pan || 'NOT PROVIDED'}, RRN: ${rrn || 'NOT PROVIDED'}`);
         
         const result = await request.query(query);
         
@@ -261,11 +256,6 @@ app.post('/api/prm/query', async (req, res) => {
             database: 'PRM (MSSQL)',
             data: formattedData,
             count: formattedData.length,
-            search_criteria: {
-                pan_used: pan || null,
-                date_from: dateFrom || null,
-                date_to: dateTo || null
-            },
             connectionError: false,
             isConnected: true
         });
@@ -283,9 +273,9 @@ app.post('/api/prm/query', async (req, res) => {
     }
 });
 
-// UPF Query endpoint - Uses STAN, RRN, and masked PAN, uses LAST_MODIFIED for date range
+// UPF Query endpoint (Oracle 1) - FIXED for Masked PAN
 app.post('/api/upf/query', async (req, res) => {
-    const { pan, rrn, stan, dateFrom, dateTo } = req.body;
+    const { pan, rrn, stan } = req.body;
     let connection;
     
     if (!oracle1Pool || !connectionStatus.upf) {
@@ -303,94 +293,87 @@ app.post('/api/upf/query', async (req, res) => {
     try {
         connection = await oracle1Pool.getConnection();
         
+        // Build query dynamically - using SELECT * like your working query
         let query = `SELECT * FROM ep_log WHERE msg_tp = 'AccptrCmpltnAdvc'`;
         const params = {};
         
-        // Add STAN condition (if provided)
+        // Add conditions based on what's provided
         if (stan && stan.trim()) {
             query += ` AND stan = :stan`;
             params.stan = stan;
         }
         
-        // Add RRN condition (if provided)
         if (rrn && rrn.trim()) {
             query += ` AND JSON_VALUE(ext, '$.AccptrCmpltnAdvc.CmpltnAdvc.Cntxt.SaleCntxt.SaleRefNb') = :rrn`;
             params.rrn = rrn;
         }
         
-        // Add PAN condition - convert to masked format for searching
         if (pan && pan.trim()) {
-            let searchPan = pan;
-            if (pan.length === 16 && /^\d{16}$/.test(pan)) {
-                searchPan = `${pan.substring(0, 6)}******${pan.substring(pan.length - 4)}`;
-                logToFile(`Converted full PAN to masked format: ${searchPan}`);
+            // For PAN, we need to search within the JSON field since the column PAN is masked
+            // Convert full PAN to masked format for comparison
+            let maskedPan = pan;
+            if (pan.length === 16) {
+                maskedPan = `${pan.substring(0, 6)}******${pan.substring(pan.length - 4)}`;
             }
             query += ` AND JSON_VALUE(ext, '$.AccptrCmpltnAdvc.CmpltnAdvc.Envt.Card.PlainCardData.PAN') LIKE :panPattern`;
-            params.panPattern = `%${searchPan}%`;
+            params.panPattern = `%${maskedPan}%`;
+            console.log(`Searching for masked PAN: ${maskedPan}`);
         }
         
-        // Add date range using LAST_MODIFIED column
-        if (dateFrom && dateFrom.trim()) {
-            query += ` AND LAST_MODIFIED >= TO_TIMESTAMP(:dateFrom, 'YYYY-MM-DD"T"HH24:MI:SS.FF3"Z"')`;
-            params.dateFrom = dateFrom;
-        }
-        
-        if (dateTo && dateTo.trim()) {
-            query += ` AND LAST_MODIFIED <= TO_TIMESTAMP(:dateTo, 'YYYY-MM-DD"T"HH24:MI:SS.FF3"Z"')`;
-            params.dateTo = dateTo;
-        }
-        
-        query += ` ORDER BY LAST_MODIFIED DESC`;
+        // Add limit to prevent too many records
         query += ` FETCH FIRST 100 ROWS ONLY`;
         
         logToFile(`UPF Query - STAN: ${stan || 'NOT PROVIDED'}, RRN: ${rrn || 'NOT PROVIDED'}, PAN: ${pan || 'NOT PROVIDED'}`);
-        logToFile(`UPF Query - DateFrom: ${dateFrom || 'NOT PROVIDED'}, DateTo: ${dateTo || 'NOT PROVIDED'}`);
         
         const result = await connection.execute(query, params);
         
         logToFile(`UPF Query completed - Found ${result.rows.length} records`);
         
+        // Process results - format data nicely
         const formattedData = [];
         
         for (const row of result.rows) {
             const record = {};
             
+            // Map each column by its metadata name
             if (result.metaData) {
                 result.metaData.forEach((col, index) => {
                     let value = row[index];
                     
+                    // Parse JSON if it's the ext column
                     if (col.name === 'EXT' || col.name === 'ext') {
                         if (value) {
                             try {
                                 const parsed = typeof value === 'string' ? JSON.parse(value) : value;
-                                record.json_data = parsed;
+                                record[col.name] = parsed;
+                                record.parsed_json = parsed;
                                 
-                                // Extract key fields for easy display
-                                const saleCtx = parsed?.AccptrCmpltnAdvc?.CmpltnAdvc?.Cntxt?.SaleCntxt;
-                                const envCard = parsed?.AccptrCmpltnAdvc?.CmpltnAdvc?.Envt?.Card?.PlainCardData;
-                                const response = parsed?.AccptrCmpltnAdvc?.CmpltnAdvc?.Rspn;
+                                // Extract useful fields from JSON for easy display
+                                const saleRefNb = parsed?.AccptrCmpltnAdvc?.CmpltnAdvc?.Cntxt?.SaleCntxt?.SaleRefNb;
+                                const panFromJson = parsed?.AccptrCmpltnAdvc?.CmpltnAdvc?.Envt?.Card?.PlainCardData?.PAN;
+                                const amount = parsed?.AccptrCmpltnAdvc?.CmpltnAdvc?.Cntxt?.SaleCntxt?.Amt;
+                                const currency = parsed?.AccptrCmpltnAdvc?.CmpltnAdvc?.Cntxt?.SaleCntxt?.Ccy;
+                                const responseCode = parsed?.AccptrCmpltnAdvc?.CmpltnAdvc?.Rspn?.RspnCd;
                                 
-                                if (saleCtx) {
-                                    if (saleCtx.SaleRefNb) record.rrn = saleCtx.SaleRefNb;
-                                    if (saleCtx.Amt) record.amount = saleCtx.Amt;
-                                    if (saleCtx.Ccy) record.currency = saleCtx.Ccy;
+                                if (saleRefNb) record.extracted_rrn = saleRefNb;
+                                if (panFromJson) {
+                                    // Show the PAN as is (it's already masked in the JSON)
+                                    record.extracted_pan = panFromJson;
                                 }
-                                if (envCard && envCard.PAN) {
-                                    record.pan = envCard.PAN;
-                                }
-                                if (response && response.RspnCd) {
-                                    record.response_code = response.RspnCd;
-                                }
+                                if (amount) record.extracted_amount = amount;
+                                if (currency) record.extracted_currency = currency;
+                                if (responseCode) record.extracted_response_code = responseCode;
                             } catch (e) {
-                                record.json_raw = value;
+                                record[col.name] = value;
                             }
                         }
-                    } else if ((col.name === 'PAN' || col.name === 'pan') && value) {
-                        record.masked_pan_column = value;
-                    } else if (col.name === 'LAST_MODIFIED' || col.name === 'last_modified') {
-                        record.last_modified = value;
                     } else {
-                        record[col.name.toLowerCase()] = value;
+                        // For PAN column, it's already masked in the database
+                        if ((col.name === 'PAN' || col.name === 'pan') && value) {
+                            record[col.name] = value; // Keep as is (already masked)
+                        } else {
+                            record[col.name] = value;
+                        }
                     }
                 });
             }
@@ -404,14 +387,12 @@ app.post('/api/upf/query', async (req, res) => {
             data: formattedData,
             count: formattedData.length,
             search_criteria: {
-                stan_used: stan || null,
-                rrn_used: rrn || null,
-                pan_original: pan || null,
-                pan_masked_for_search: pan && pan.length === 16 ? `${pan.substring(0, 6)}******${pan.substring(pan.length - 4)}` : pan,
-                date_from: dateFrom || null,
-                date_to: dateTo || null
+                stan_provided: !!(stan && stan.trim()),
+                rrn_provided: !!(rrn && rrn.trim()),
+                pan_provided: !!(pan && pan.trim()),
+                pan_used_for_search: pan && pan.trim() ? (pan.length === 16 ? `${pan.substring(0, 6)}******${pan.substring(pan.length - 4)}` : pan) : null
             },
-            note: "PAN is stored in masked format (first 6 and last 4 only) in UPF database",
+            note: "PAN is masked in UPF database (first 6 and last 4 only). Searching using masked format.",
             connectionError: false,
             isConnected: true
         });
@@ -434,7 +415,7 @@ app.post('/api/upf/query', async (req, res) => {
 
 // EPS Query endpoint (Oracle 2)
 app.post('/api/eps/query', async (req, res) => {
-    const { pan, rrn, stan, dateFrom, dateTo } = req.body;
+    const { pan, rrn, stan } = req.body;
     let connection;
     
     if (!oracle2Pool || !connectionStatus.eps) {
@@ -468,16 +449,6 @@ app.post('/api/eps/query', async (req, res) => {
         if (stan && stan.trim()) {
             query += ` AND STAN = :stan`;
             params.stan = stan;
-        }
-        
-        if (dateFrom && dateFrom.trim()) {
-            query += ` AND TRANSACTION_DATE >= TO_DATE(:dateFrom, 'YYYY-MM-DD"T"HH24:MI:SS.FF3"Z"')`;
-            params.dateFrom = dateFrom;
-        }
-        
-        if (dateTo && dateTo.trim()) {
-            query += ` AND TRANSACTION_DATE <= TO_DATE(:dateTo, 'YYYY-MM-DD"T"HH24:MI:SS.FF3"Z"')`;
-            params.dateTo = dateTo;
         }
         
         if (Object.keys(params).length === 0) {
@@ -579,7 +550,7 @@ app.get('/api/health', async (req, res) => {
     });
 });
 
-// Debug endpoints
+// Debug: Show actual columns in ep_log table
 app.get('/api/upf/debug-columns', async (req, res) => {
     let connection;
     try {
@@ -618,6 +589,7 @@ app.get('/api/upf/debug-columns', async (req, res) => {
     }
 });
 
+// Debug: Show PRM table columns
 app.get('/api/prm/columns', async (req, res) => {
     if (!mssqlPool || !connectionStatus.prm) {
         return res.json({ error: 'PRM Database not connected' });
@@ -639,6 +611,32 @@ app.get('/api/prm/columns', async (req, res) => {
     }
 });
 
+// Debug: Show UPF tables
+app.get('/api/upf/tables', async (req, res) => {
+    let connection;
+    try {
+        if (!oracle1Pool || !connectionStatus.upf) {
+            return res.json({ error: 'UPF Database not connected' });
+        }
+        
+        connection = await oracle1Pool.getConnection();
+        const result = await connection.execute(`
+            SELECT table_name FROM user_tables ORDER BY table_name
+        `);
+        
+        const tables = result.rows.map(row => row[0]);
+        res.json({
+            success: true,
+            tables: tables,
+            count: tables.length
+        });
+    } catch (err) {
+        res.json({ error: err.message });
+    } finally {
+        if (connection) await connection.close();
+    }
+});
+
 // Serve HTML page
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
@@ -653,6 +651,7 @@ async function startServer() {
         logToFile(`📱 Open your browser to use the application\n`);
         logToFile(`🔍 Debug Endpoints:`);
         logToFile(`   - PRM Columns: http://localhost:${port}/api/prm/columns`);
+        logToFile(`   - UPF Tables: http://localhost:${port}/api/upf/tables`);
         logToFile(`   - UPF Columns: http://localhost:${port}/api/upf/debug-columns`);
         logToFile(`   - Health Check: http://localhost:${port}/api/health\n`);
     });
