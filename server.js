@@ -276,7 +276,7 @@ app.post('/api/prm/query', async (req, res) => {
     }
 });
 
-// UPF Query endpoint (Oracle 1)
+// UPF Query endpoint (Oracle 1) - FIXED WITH CORRECT JSON PATHS
 app.post('/api/upf/query', async (req, res) => {
     const { pan, rrn, stan } = req.body;
     let connection;
@@ -296,6 +296,7 @@ app.post('/api/upf/query', async (req, res) => {
     try {
         connection = await oracle1Pool.getConnection();
         
+        // Build query dynamically based on provided parameters
         let query = `
             SELECT 
                 stan,
@@ -303,9 +304,8 @@ app.post('/api/upf/query', async (req, res) => {
                 ext,
                 trx_dt,
                 trx_tm,
-                pan as masked_pan,
                 JSON_VALUE(ext, '$.AccptrCmpltnAdvc.CmpltnAdvc.Cntxt.SaleCntxt.SaleRefNb') as rrn,
-                JSON_VALUE(ext, '$.AccptrCmpltnAdvc.CmpltnAdvc.Cntxt.SaleCntxt.PAN') as pan_from_json,
+                JSON_VALUE(ext, '$.AccptrCmpltnAdvc.CmpltnAdvc.Envt.Card.PlainCardData.PAN') as pan_from_json,
                 JSON_VALUE(ext, '$.AccptrCmpltnAdvc.CmpltnAdvc.Cntxt.SaleCntxt.Amt') as amount,
                 JSON_VALUE(ext, '$.AccptrCmpltnAdvc.CmpltnAdvc.Cntxt.SaleCntxt.Ccy') as currency,
                 JSON_VALUE(ext, '$.AccptrCmpltnAdvc.CmpltnAdvc.Rspn.RspnCd') as response_code
@@ -315,6 +315,7 @@ app.post('/api/upf/query', async (req, res) => {
         
         const params = {};
         
+        // Add conditions based on what's provided
         if (stan && stan.trim()) {
             query += ` AND stan = :stan`;
             params.stan = stan;
@@ -326,16 +327,20 @@ app.post('/api/upf/query', async (req, res) => {
         }
         
         if (pan && pan.trim()) {
-            query += ` AND (pan = :pan OR JSON_VALUE(ext, '$.AccptrCmpltnAdvc.CmpltnAdvc.Cntxt.SaleCntxt.PAN') LIKE :panPattern)`;
+            query += ` AND JSON_VALUE(ext, '$.AccptrCmpltnAdvc.CmpltnAdvc.Envt.Card.PlainCardData.PAN') = :pan`;
             params.pan = pan;
-            params.panPattern = `%${pan}%`;
         }
+        
+        // If NO stan provided, don't filter by stan
+        // The query already has msg_tp filter only
         
         query += ` ORDER BY trx_dt DESC, trx_tm DESC`;
         
-        logToFile(`UPF Query - STAN: ${stan}, RRN: ${rrn}, PAN: ${pan}`);
+        console.log(`UPF Query - STAN: ${stan || 'NOT PROVIDED'}, RRN: ${rrn || 'NOT PROVIDED'}, PAN: ${pan || 'NOT PROVIDED'}`);
         
         const result = await connection.execute(query, params);
+        
+        console.log(`UPF Query completed - Found ${result.rows.length} records`);
         
         const formattedData = [];
         
@@ -343,27 +348,27 @@ app.post('/api/upf/query', async (req, res) => {
             const formattedRow = {
                 stan: row[0],
                 msg_tp: row[1],
-                trx_dt: row[2],
-                trx_tm: row[3],
-                masked_pan: row[4] ? maskPAN(row[4]) : null,
+                transaction_date: row[3],
+                transaction_time: row[4],
                 rrn: row[5],
-                pan_from_json: row[6] ? maskPAN(row[6]) : null,
+                pan: row[6] ? maskPAN(row[6]) : null,
                 amount: row[7],
                 currency: row[8],
                 response_code: row[9]
             };
             
+            // Parse and include full JSON data for reference
             if (row[2]) {
-                const parsedJSON = formatJSONData(row[2]);
-                if (parsedJSON && typeof parsedJSON === 'object') {
-                    formattedRow.full_json_data = parsedJSON;
+                try {
+                    const extJson = typeof row[2] === 'string' ? JSON.parse(row[2]) : row[2];
+                    formattedRow.full_json_data = extJson;
+                } catch (e) {
+                    formattedRow.full_json_data = { raw: row[2], parse_error: e.message };
                 }
             }
             
             formattedData.push(formattedRow);
         }
-        
-        logToFile(`UPF Query completed - Found ${formattedData.length} records`);
         
         res.json({
             success: true,
@@ -375,7 +380,7 @@ app.post('/api/upf/query', async (req, res) => {
         });
         
     } catch (err) {
-        logToFile('UPF Query Error: ' + err.message);
+        console.error('UPF Query Error:', err);
         res.json({
             success: false,
             database: 'UPF (Oracle 1)',
