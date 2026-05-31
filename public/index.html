@@ -186,78 +186,97 @@
 
         .card-body {
             padding: 20px;
-            max-height: 600px;
+            max-height: 700px;
             overflow-y: auto;
         }
 
-        /* Improved Table Styles with Horizontal Scroll */
-        .table-wrapper {
-            overflow-x: auto;
-            overflow-y: visible;
-            margin-top: 10px;
-            border-radius: 8px;
-            border: 1px solid #dee2e6;
+        /* Vertical Card Layout for Records */
+        .records-container {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
         }
 
-        .data-table {
-            font-size: 12px;
-            margin-bottom: 0;
-            width: 100%;
-            min-width: 600px;
-        }
-
-        .data-table th {
+        .record-card {
             background: #f8f9fa;
-            position: sticky;
-            top: 0;
-            font-weight: 600;
-            padding: 10px 8px;
-            white-space: nowrap;
-            z-index: 10;
-        }
-
-        .data-table td {
-            padding: 8px;
-            vertical-align: top;
-            word-wrap: break-word;
-            max-width: 250px;
-        }
-
-        .data-table tr:hover {
-            background-color: #f5f5f5;
-        }
-
-        /* Copy Row Button */
-        .copy-row-btn {
-            background: none;
-            border: none;
-            color: #0d6efd;
-            cursor: pointer;
-            padding: 4px 8px;
-            border-radius: 5px;
-            font-size: 12px;
+            border-radius: 12px;
+            border: 1px solid #e0e0e0;
+            overflow: hidden;
             transition: all 0.2s;
         }
 
-        .copy-row-btn:hover {
-            background: #e7f3ff;
-            transform: scale(1.05);
+        .record-card:hover {
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
         }
 
-        .copy-row-btn:active {
-            transform: scale(0.95);
+        .record-header {
+            background: linear-gradient(135deg, #667eea20, #764ba220);
+            padding: 12px 15px;
+            border-bottom: 2px solid #667eea;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
         }
 
-        /* Toast Notification */
-        .toast-custom {
-            background: linear-gradient(135deg, #667eea, #764ba2);
+        .record-header h6 {
+            margin: 0;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .copy-record-btn {
+            background: #0d6efd;
+            border: none;
             color: white;
-            border-radius: 10px;
-            font-size: 14px;
-            padding: 12px 20px;
+            padding: 5px 12px;
+            border-radius: 8px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
         }
 
-        /* JSON Viewer Styles */
+        .copy-record-btn:hover {
+            background: #0b5ed7;
+            transform: scale(1.02);
+        }
+
+        .record-body {
+            padding: 15px;
+            display: none;
+        }
+
+        .record-body.expanded {
+            display: block;
+        }
+
+        .field-row {
+            display: grid;
+            grid-template-columns: 180px 1fr;
+            gap: 10px;
+            padding: 8px 0;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .field-row:last-child {
+            border-bottom: none;
+        }
+
+        .field-label {
+            font-weight: 600;
+            color: #495057;
+            font-size: 12px;
+            word-break: break-word;
+        }
+
+        .field-value {
+            color: #212529;
+            font-size: 12px;
+            word-break: break-word;
+            font-family: 'Consolas', 'Monaco', monospace;
+        }
+
+        /* JSON Viewer inside vertical layout */
         .json-viewer {
             background: #1e1e1e;
             color: #d4d4d4;
@@ -267,7 +286,7 @@
             font-size: 11px;
             overflow-x: auto;
             line-height: 1.4;
-            max-height: 150px;
+            max-height: 200px;
         }
 
         .json-key {
@@ -346,14 +365,29 @@
             font-size: 16px;
         }
 
-        /* Record Count Badge */
         .record-count {
             background: #e9ecef;
-            padding: 5px 12px;
+            padding: 8px 15px;
             border-radius: 20px;
-            font-size: 12px;
+            font-size: 13px;
             display: inline-block;
-            margin-bottom: 10px;
+            margin-bottom: 15px;
+        }
+
+        .expand-all-btn, .collapse-all-btn {
+            background: #6c757d;
+            border: none;
+            color: white;
+            padding: 5px 12px;
+            border-radius: 8px;
+            font-size: 12px;
+            cursor: pointer;
+            margin-left: 10px;
+            transition: all 0.2s;
+        }
+
+        .expand-all-btn:hover, .collapse-all-btn:hover {
+            background: #5a6268;
         }
 
         @media (max-width: 768px) {
@@ -372,9 +406,8 @@
                 font-size: 1.5rem;
             }
             
-            .data-table td, .data-table th {
-                padding: 6px;
-                font-size: 11px;
+            .field-row {
+                grid-template-columns: 120px 1fr;
             }
         }
     </style>
@@ -467,8 +500,8 @@
                         <li><strong>PRM Database:</strong> Searches by PAN, RRN, and Date Range (using <code>DD_APDATE</code> column)</li>
                         <li><strong>UPF Database:</strong> Searches by STAN, RRN, PAN (masked), and Date Range (using <code>LAST_MODIFIED</code> column)</li>
                         <li><strong>EPS Database:</strong> Searches by PAN, RRN, and STAN</li>
-                        <li><i class="fas fa-copy"></i> <strong>Copy Row:</strong> Click the copy icon on any row to copy its data to clipboard</li>
-                        <li><i class="fas fa-arrows-alt-h"></i> <strong>Scroll:</strong> Tables are horizontally scrollable - use mouse wheel or scroll bar</li>
+                        <li><i class="fas fa-copy"></i> <strong>Copy Record:</strong> Click the copy button on any record to copy its data to clipboard</li>
+                        <li><i class="fas fa-chevron-down"></i> <strong>Expand/Collapse:</strong> Click on any record header to expand/collapse details</li>
                     </ul>
                 </div>
             </div>
@@ -555,39 +588,41 @@
                 gravity: "top",
                 position: "right",
                 style: {
-                    background: type === 'success' ? "linear-gradient(135deg, #28a745, #20c997)" : "linear-gradient(135deg, #dc3545, #fd7e14)",
+                    background: type === 'success' ? "linear-gradient(135deg, #28a745, #20c997)" : 
+                               type === 'error' ? "linear-gradient(135deg, #dc3545, #fd7e14)" :
+                               "linear-gradient(135deg, #17a2b8, #0dcaf0)",
                     borderRadius: "10px",
                     fontSize: "14px"
                 }
             }).showToast();
         }
         
-        // Copy to clipboard function
-        async function copyRowToClipboard(rowData, databaseName) {
+        // Copy record to clipboard
+        async function copyRecordToClipboard(recordData, databaseName, recordIndex) {
             try {
-                // Format the row data as readable text
-                let formattedText = `📊 ${databaseName} - Transaction Record\n`;
-                formattedText += `${'='.repeat(50)}\n`;
+                let formattedText = `📊 ${databaseName} - Transaction Record #${recordIndex + 1}\n`;
+                formattedText += `${'='.repeat(60)}\n\n`;
                 
-                for (const [key, value] of Object.entries(rowData)) {
+                for (const [key, value] of Object.entries(recordData)) {
                     let displayValue = value;
                     if (typeof value === 'object') {
                         displayValue = JSON.stringify(value, null, 2);
                     }
                     formattedText += `${key.toUpperCase()}: ${displayValue}\n`;
                 }
-                formattedText += `${'='.repeat(50)}`;
+                formattedText += `\n${'='.repeat(60)}`;
+                formattedText += `\n📅 Copied on: ${new Date().toLocaleString()}`;
                 
                 await navigator.clipboard.writeText(formattedText);
-                showToast(`✅ Copied to clipboard!`, 'success');
+                showToast(`✅ Record #${recordIndex + 1} copied to clipboard!`, 'success');
             } catch (err) {
                 console.error('Copy failed:', err);
                 showToast(`❌ Failed to copy: ${err.message}`, 'error');
             }
         }
         
-        // Pretty print JSON with syntax highlighting
-        function prettyPrintJSON(obj, indent = 0) {
+        // Pretty print JSON
+        function prettyPrintJSON(obj) {
             if (obj === null) return '<span class="json-null">null</span>';
             if (typeof obj === 'string') return `<span class="json-string">"${escapeHtml(obj.substring(0, 200))}${obj.length > 200 ? '...' : ''}"</span>`;
             if (typeof obj === 'number') return `<span class="json-number">${obj}</span>`;
@@ -596,7 +631,7 @@
                 if (obj.length === 0) return '<span class="json-bracket">[]</span>';
                 let html = '<span class="json-bracket">[</span><div style="margin-left: 15px;">';
                 obj.slice(0, 5).forEach((item, i) => {
-                    html += `<div>${prettyPrintJSON(item, indent + 1)}${i < Math.min(obj.length, 5) - 1 ? ',' : ''}</div>`;
+                    html += `<div>${prettyPrintJSON(item)}${i < Math.min(obj.length, 5) - 1 ? ',' : ''}</div>`;
                 });
                 if (obj.length > 5) html += `<div>... and ${obj.length - 5} more</div>`;
                 html += `</div><span class="json-bracket">]</span>`;
@@ -606,11 +641,11 @@
                 const keys = Object.keys(obj);
                 if (keys.length === 0) return '<span class="json-bracket">{}</span>';
                 let html = '<span class="json-bracket">{</span><div style="margin-left: 15px;">';
-                const displayKeys = keys.slice(0, 10);
+                const displayKeys = keys.slice(0, 15);
                 displayKeys.forEach((key, i) => {
-                    html += `<div><span class="json-key">"${escapeHtml(key)}"</span>: ${prettyPrintJSON(obj[key], indent + 1)}${i < displayKeys.length - 1 ? ',' : ''}</div>`;
+                    html += `<div><span class="json-key">"${escapeHtml(key)}"</span>: ${prettyPrintJSON(obj[key])}${i < displayKeys.length - 1 ? ',' : ''}</div>`;
                 });
-                if (keys.length > 10) html += `<div>... and ${keys.length - 10} more fields</div>`;
+                if (keys.length > 15) html += `<div>... and ${keys.length - 15} more fields</div>`;
                 html += `</div><span class="json-bracket">}</span>`;
                 return html;
             }
@@ -623,40 +658,105 @@
             return div.innerHTML;
         }
         
-        // Format data as table with copy buttons and horizontal scroll
-        function formatAsTable(data, databaseName) {
+        // Format data as vertical cards (no horizontal scroll needed)
+        function formatAsVerticalCards(data, databaseName) {
             if (!data || data.length === 0) return null;
             
-            const columns = Object.keys(data[0]);
-            let table = '<div class="table-wrapper"><table class="data-table table table-sm table-bordered table-hover">';
-            table += '<thead><tr>';
-            table += '<th style="width: 40px; text-align: center;">📋</th>';
-            columns.forEach(col => {
-                table += `<th>${col.toUpperCase()}</th>`;
-            });
-            table += '</thead><tbody>';
+            let html = '<div class="records-container">';
             
-            data.forEach((row, idx) => {
-                table += `<tr id="row-${databaseName}-${idx}">`;
-                table += `<td style="text-align: center;">
-                            <button class="copy-row-btn" onclick="copyRowToClipboard(${JSON.stringify(row).replace(/"/g, '&quot;')}, '${databaseName}')" title="Copy this row to clipboard">
-                                <i class="fas fa-copy"></i>
+            // Add expand/collapse all buttons
+            html += `
+                <div style="margin-bottom: 15px; text-align: right;">
+                    <button class="expand-all-btn" onclick="expandAllRecords('${databaseName.replace(/\s/g, '')}')">
+                        <i class="fas fa-expand-alt"></i> Expand All
+                    </button>
+                    <button class="collapse-all-btn" onclick="collapseAllRecords('${databaseName.replace(/\s/g, '')}')">
+                        <i class="fas fa-compress-alt"></i> Collapse All
+                    </button>
+                </div>
+            `;
+            
+            data.forEach((record, idx) => {
+                html += `
+                    <div class="record-card" data-record-idx="${idx}">
+                        <div class="record-header" onclick="toggleRecord(${idx}, '${databaseName.replace(/\s/g, '')}')">
+                            <h6>
+                                <i class="fas fa-receipt"></i> 
+                                Transaction Record #${idx + 1}
+                                <span style="font-size: 11px; margin-left: 10px; color: #666;">
+                                    <i class="fas fa-chevron-down"></i> Click to expand
+                                </span>
+                            </h6>
+                            <button class="copy-record-btn" onclick="event.stopPropagation(); copyRecordToClipboard(${JSON.stringify(record).replace(/"/g, '&quot;')}, '${databaseName}', ${idx})">
+                                <i class="fas fa-copy"></i> Copy
                             </button>
-                          </td>`;
-                columns.forEach(col => {
-                    let value = row[col];
-                    if (value === null || value === undefined) value = '-';
-                    if (typeof value === 'object') {
-                        value = `<div class="json-viewer">${prettyPrintJSON(value)}</div>`;
+                        </div>
+                        <div class="record-body" id="record-body-${databaseName.replace(/\s/g, '')}-${idx}">
+                `;
+                
+                // Display each field as a row
+                for (const [key, value] of Object.entries(record)) {
+                    let displayValue = value;
+                    if (value === null || value === undefined) {
+                        displayValue = '<span style="color: #999;">-</span>';
+                    } else if (typeof value === 'object') {
+                        displayValue = `<div class="json-viewer">${prettyPrintJSON(value)}</div>`;
+                    } else if (typeof value === 'string' && (value.startsWith('{') || value.startsWith('['))) {
+                        try {
+                            const parsed = JSON.parse(value);
+                            displayValue = `<div class="json-viewer">${prettyPrintJSON(parsed)}</div>`;
+                        } catch (e) {
+                            displayValue = escapeHtml(value);
+                        }
+                    } else {
+                        displayValue = escapeHtml(String(value));
                     }
-                    table += `<td style="max-width: 250px; word-wrap: break-word;">${value}</td>`;
-                });
-                table += '</tr>';
+                    
+                    html += `
+                        <div class="field-row">
+                            <div class="field-label">
+                                <i class="fas fa-tag"></i> ${key.toUpperCase()}:
+                            </div>
+                            <div class="field-value">${displayValue}</div>
+                        </div>
+                    `;
+                }
+                
+                html += `
+                        </div>
+                    </div>
+                `;
             });
-            table += '</tbody></table></div>';
             
-            return table;
+            html += '</div>';
+            return html;
         }
+        
+        // Toggle record expansion
+        window.toggleRecord = function(idx, dbId) {
+            const body = document.getElementById(`record-body-${dbId}-${idx}`);
+            if (body) {
+                body.classList.toggle('expanded');
+            }
+        };
+        
+        // Expand all records
+        window.expandAllRecords = function(dbId) {
+            const bodies = document.querySelectorAll(`[id^="record-body-${dbId}-"]`);
+            bodies.forEach(body => {
+                body.classList.add('expanded');
+            });
+            showToast(`Expanded all records`, 'info');
+        };
+        
+        // Collapse all records
+        window.collapseAllRecords = function(dbId) {
+            const bodies = document.querySelectorAll(`[id^="record-body-${dbId}-"]`);
+            bodies.forEach(body => {
+                body.classList.remove('expanded');
+            });
+            showToast(`Collapsed all records`, 'info');
+        };
         
         // Update status badges
         function updateStatusUI() {
@@ -721,13 +821,15 @@
                     });
                     const result = await response.json();
                     result.displayName = ep.displayName;
+                    result.dbId = ep.displayName.replace(/\s/g, '');
                     results[ep.name] = result;
                 } catch (error) {
                     results[ep.name] = {
                         success: false,
                         error: `Network error: ${error.message}`,
                         data: [],
-                        displayName: ep.displayName
+                        displayName: ep.displayName,
+                        dbId: ep.displayName.replace(/\s/g, '')
                     };
                 }
             }
@@ -755,14 +857,14 @@
             if (result.data && result.data.length > 0) {
                 const recordCount = result.data.length;
                 countSpan.innerHTML = `${recordCount} Record${recordCount > 1 ? 's' : ''}`;
-                const tableHtml = formatAsTable(result.data, result.displayName);
+                const cardsHtml = formatAsVerticalCards(result.data, result.displayName);
                 content.innerHTML = `
                     <div class="record-count">
                         <i class="fas fa-chart-line"></i> Total Records Found: <strong>${recordCount}</strong>
-                        <span style="margin-left: 10px;"><i class="fas fa-arrows-alt-h"></i> Scroll horizontally to see all columns</span>
-                        <span style="margin-left: 10px;"><i class="fas fa-copy"></i> Click 📋 to copy any row</span>
+                        <span style="margin-left: 10px;"><i class="fas fa-copy"></i> Click "Copy" on any record</span>
+                        <span style="margin-left: 10px;"><i class="fas fa-chevron-down"></i> Click header to expand/collapse</span>
                     </div>
-                    ${tableHtml}
+                    ${cardsHtml}
                 `;
             } else {
                 countSpan.innerHTML = 'No Data';
@@ -775,6 +877,12 @@
                 `;
             }
         }
+        
+        // Make functions globally available
+        window.copyRecordToClipboard = copyRecordToClipboard;
+        window.toggleRecord = toggleRecord;
+        window.expandAllRecords = expandAllRecords;
+        window.collapseAllRecords = collapseAllRecords;
         
         // Handle form submission
         document.getElementById('searchForm').addEventListener('submit', async (e) => {
@@ -811,7 +919,6 @@
                 updateCardResult('upfContent', 'upfCount', results.upf);
                 updateCardResult('epsContent', 'epsCount', results.eps);
                 
-                // Show summary toast
                 const totalRecords = (results.prm.count || 0) + (results.upf.count || 0) + (results.eps.count || 0);
                 if (totalRecords > 0) {
                     showToast(`🎉 Found ${totalRecords} total records across all databases`, 'success');
@@ -881,9 +988,6 @@
                 document.getElementById('searchForm').dispatchEvent(new Event('submit'));
             }
         });
-        
-        // Make copy function globally available
-        window.copyRowToClipboard = copyRowToClipboard;
     </script>
 </body>
 </html>
