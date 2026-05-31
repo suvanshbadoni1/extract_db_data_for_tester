@@ -13,28 +13,36 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
 
-// Database configuration
+// PRM Database configuration (MSSQL) - Updated with your credentials
 const mssqlConfig = {
-    user: process.env.MSSQL_USER || 'sa',
-    password: process.env.MSSQL_PASSWORD || '',
-    server: process.env.MSSQL_SERVER || 'localhost',
-    database: process.env.MSSQL_DATABASE || 'PRM_DB',
-    port: parseInt(process.env.MSSQL_PORT) || 1433,
+    user: process.env.MSSQL_USER || 'test_user',
+    password: process.env.MSSQL_PASSWORD || 'test123',
+    server: process.env.MSSQL_SERVER || '10.230.195.68',
+    database: process.env.MSSQL_DATABASE || 'PRMNRT',
+    port: parseInt(process.env.MSSQL_PORT) || 14889,
     options: {
-        encrypt: false,
-        trustServerCertificate: true,
+        encrypt: false,  // Set to false for local/internal connections
+        trustServerCertificate: true,  // Important for self-signed certificates
         enableArithAbort: true,
         connectionTimeout: 30000,
-        requestTimeout: 30000
+        requestTimeout: 30000,
+        instanceName: ''
+    },
+    pool: {
+        max: 10,
+        min: 0,
+        idleTimeoutMillis: 30000
     }
 };
 
+// Oracle 1 (UPF) Configuration - Update with your actual values
 const oracle1Config = {
     user: process.env.ORACLE1_USER || 'upf_user',
     password: process.env.ORACLE1_PASSWORD || '',
     connectString: process.env.ORACLE1_CONNECT_STRING || 'localhost:1521/UPFDB'
 };
 
+// Oracle 2 (EPS) Configuration - Update with your actual values
 const oracle2Config = {
     user: process.env.ORACLE2_USER || 'eps_user',
     password: process.env.ORACLE2_PASSWORD || '',
@@ -58,20 +66,36 @@ let connectionStatus = {
 async function initializeDatabases() {
     console.log('\n🔌 Initializing Database Connections...\n');
     
-    // Initialize MSSQL (PRM)
+    // Initialize MSSQL (PRM) - Using your actual database
     try {
+        console.log(`Attempting to connect to PRM Database:`);
+        console.log(`   Server: ${mssqlConfig.server}:${mssqlConfig.port}`);
+        console.log(`   Database: ${mssqlConfig.database}`);
+        console.log(`   User: ${mssqlConfig.user}`);
+        
         mssqlPool = await sql.connect(mssqlConfig);
         connectionStatus.prm = true;
         connectionStatus.prmError = null;
         console.log('✅ PRM (MSSQL) Database - Connected successfully');
         
         // Test the connection with a simple query
-        await mssqlPool.request().query('SELECT 1');
-        console.log('   PRM Connection verified');
+        const testResult = await mssqlPool.request().query('SELECT @@VERSION as version, GETDATE() as currentTime');
+        console.log(`   PRM Connection verified - SQL Server Version: ${testResult.recordset[0].version.substring(0, 50)}...`);
+        
+        // Test your actual table exists
+        try {
+            const tableCheck = await mssqlPool.request().query('SELECT TOP 1 * FROM [PRMNRT].[dbo].[DETAIL]');
+            console.log(`   Table 'DETAIL' is accessible - Found ${tableCheck.recordset.length} sample record(s)`);
+        } catch (tableErr) {
+            console.log(`   ⚠️  Table 'DETAIL' check: ${tableErr.message}`);
+        }
+        
     } catch (err) {
         connectionStatus.prm = false;
         connectionStatus.prmError = err.message;
         console.log('❌ PRM (MSSQL) Database - Connection failed:', err.message);
+        if (err.code) console.log(`   Error Code: ${err.code}`);
+        if (err.number) console.log(`   SQL Error Number: ${err.number}`);
     }
     
     // Initialize Oracle 1 (UPF)
@@ -131,7 +155,7 @@ async function initializeDatabases() {
     console.log(`   EPS (Oracle): ${connectionStatus.eps ? '🟢 Online' : '🔴 Offline'}${connectionStatus.epsError ? ` - ${connectionStatus.epsError}` : ''}\n`);
 }
 
-// PRM Query endpoint
+// PRM Query endpoint - Using your actual DETAIL table
 app.post('/api/prm/query', async (req, res) => {
     const { pan, rrn, stan } = req.body;
     
@@ -148,21 +172,19 @@ app.post('/api/prm/query', async (req, res) => {
     }
     
     try {
-        // Sample query - Replace with your actual table/column names
+        // Query your actual DETAIL table
+        // Adjust the WHERE clause based on your actual column names
+        // Assuming your DETAIL table has columns like PAN, RRN, STAN
+        // If column names are different, please update them below
         const query = `
-            SELECT 
-                'PRM-' + CAST(@stan AS VARCHAR) as TransactionID,
-                @pan as PAN,
-                @rrn as RRN,
-                @stan as STAN,
-                1000.00 as Amount,
-                GETDATE() as TransactionDate,
-                '00' as ResponseCode,
-                'PRM Merchant' as MerchantName,
-                'VISA' as CardType,
-                'PURCHASE' as TransactionType,
-                'PRM Database' as Source
+            SELECT * 
+            FROM [PRMNRT].[dbo].[DETAIL]
+            WHERE PAN = @pan 
+               OR RRN = @rrn 
+               OR STAN = @stan
         `;
+        
+        console.log(`PRM Query - PAN: ${pan}, RRN: ${rrn}, STAN: ${stan}`);
         
         const request = mssqlPool.request();
         request.input('pan', sql.VarChar, pan);
@@ -170,6 +192,8 @@ app.post('/api/prm/query', async (req, res) => {
         request.input('stan', sql.VarChar, stan);
         
         const result = await request.query(query);
+        
+        console.log(`PRM Query completed - Found ${result.recordset.length} records`);
         
         res.json({
             success: true,
@@ -189,6 +213,66 @@ app.post('/api/prm/query', async (req, res) => {
             count: 0,
             connectionError: false,
             isConnected: true
+        });
+    }
+});
+
+// Alternative PRM query that shows all records (for testing)
+app.get('/api/prm/all', async (req, res) => {
+    if (!mssqlPool || !connectionStatus.prm) {
+        return res.json({
+            success: false,
+            error: 'Database not connected'
+        });
+    }
+    
+    try {
+        const result = await mssqlPool.request().query('SELECT TOP 100 * FROM [PRMNRT].[dbo].[DETAIL]');
+        res.json({
+            success: true,
+            data: result.recordset,
+            count: result.recordset.length
+        });
+    } catch (err) {
+        console.error('Error fetching all records:', err);
+        res.json({
+            success: false,
+            error: err.message
+        });
+    }
+});
+
+// Get table structure for debugging
+app.get('/api/prm/structure', async (req, res) => {
+    if (!mssqlPool || !connectionStatus.prm) {
+        return res.json({
+            success: false,
+            error: 'Database not connected'
+        });
+    }
+    
+    try {
+        const query = `
+            SELECT 
+                COLUMN_NAME, 
+                DATA_TYPE, 
+                CHARACTER_MAXIMUM_LENGTH,
+                IS_NULLABLE
+            FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_NAME = 'DETAIL'
+            ORDER BY ORDINAL_POSITION
+        `;
+        
+        const result = await mssqlPool.request().query(query);
+        res.json({
+            success: true,
+            columns: result.recordset
+        });
+    } catch (err) {
+        console.error('Error fetching table structure:', err);
+        res.json({
+            success: false,
+            error: err.message
         });
     }
 });
@@ -213,39 +297,24 @@ app.post('/api/upf/query', async (req, res) => {
     try {
         connection = await oracle1Pool.getConnection();
         
-        // Sample query - Replace with your actual table/column names
+        // Update this query based on your UPF table structure
         const query = `
-            SELECT 
-                'UPF-' || :stan as TRANSACTION_ID,
-                :pan as PAN,
-                :rrn as RRN,
-                :stan as STAN,
-                1000.00 as AMOUNT,
-                SYSDATE as TRANSACTION_DATE,
-                '00' as RESPONSE_CODE,
-                'UPF Merchant' as MERCHANT_NAME,
-                'VISA' as CARD_TYPE,
-                'PURCHASE' as TRANSACTION_TYPE,
-                'UPF Database' as SOURCE
-            FROM DUAL
+            SELECT * FROM UPF_TRANSACTIONS
+            WHERE PAN = :pan OR RRN = :rrn OR STAN = :stan
         `;
         
         const result = await connection.execute(query, { pan, rrn, stan });
         
         // Format Oracle data
-        const formattedData = result.rows.map(row => ({
-            transaction_id: row[0],
-            pan: row[1],
-            rrn: row[2],
-            stan: row[3],
-            amount: row[4],
-            transaction_date: row[5],
-            response_code: row[6],
-            merchant_name: row[7],
-            card_type: row[8],
-            transaction_type: row[9],
-            source: row[10]
-        }));
+        const formattedData = result.rows.map(row => {
+            const obj = {};
+            if (result.metaData) {
+                result.metaData.forEach((col, index) => {
+                    obj[col.name.toLowerCase()] = row[index];
+                });
+            }
+            return obj;
+        });
         
         res.json({
             success: true,
@@ -291,41 +360,24 @@ app.post('/api/eps/query', async (req, res) => {
     try {
         connection = await oracle2Pool.getConnection();
         
-        // Sample query - Replace with your actual table/column names
+        // Update this query based on your EPS table structure
         const query = `
-            SELECT 
-                'EPS-' || :stan as RECORD_ID,
-                :pan as PAN,
-                :rrn as RRN,
-                :stan as STAN,
-                1000.00 as AMOUNT,
-                SYSDATE as TRANSACTION_DATE,
-                '00' as RESPONSE_CODE,
-                'PTLC001' as PTLC_CODE,
-                'EPS Merchant' as MERCHANT_ID,
-                'TERM001' as TERMINAL_ID,
-                'CLASSIC' as CARD_PRODUCT,
-                'EPS Database' as SOURCE
-            FROM DUAL
+            SELECT * FROM EPS_PTLF_RECORDS
+            WHERE PAN = :pan OR RRN = :rrn OR STAN = :stan
         `;
         
         const result = await connection.execute(query, { pan, rrn, stan });
         
         // Format Oracle data
-        const formattedData = result.rows.map(row => ({
-            record_id: row[0],
-            pan: row[1],
-            rrn: row[2],
-            stan: row[3],
-            amount: row[4],
-            transaction_date: row[5],
-            response_code: row[6],
-            ptlc_code: row[7],
-            merchant_id: row[8],
-            terminal_id: row[9],
-            card_product: row[10],
-            source: row[11]
-        }));
+        const formattedData = result.rows.map(row => {
+            const obj = {};
+            if (result.metaData) {
+                result.metaData.forEach((col, index) => {
+                    obj[col.name.toLowerCase()] = row[index];
+                });
+            }
+            return obj;
+        });
         
         res.json({
             success: true,
@@ -351,9 +403,8 @@ app.post('/api/eps/query', async (req, res) => {
     }
 });
 
-// Health check endpoint - returns actual connection status
+// Health check endpoint
 app.get('/api/health', async (req, res) => {
-    // Verify connections are still alive
     let prmAlive = false;
     let upfAlive = false;
     let epsAlive = false;
@@ -409,7 +460,9 @@ app.get('/api/health', async (req, res) => {
         details: {
             prm: {
                 connected: prmAlive,
-                error: connectionStatus.prmError
+                error: connectionStatus.prmError,
+                server: mssqlConfig.server,
+                database: mssqlConfig.database
             },
             upf: {
                 connected: upfAlive,
@@ -426,23 +479,25 @@ app.get('/api/health', async (req, res) => {
     res.json(health);
 });
 
-// Get detailed connection status
-app.get('/api/connection-status', (req, res) => {
-    res.json({
-        prm: {
-            connected: connectionStatus.prm,
-            error: connectionStatus.prmError
-        },
-        upf: {
-            connected: connectionStatus.upf,
-            error: connectionStatus.upfError
-        },
-        eps: {
-            connected: connectionStatus.eps,
-            error: connectionStatus.epsError
-        },
-        timestamp: new Date().toISOString()
-    });
+// Debug endpoint to see table structure
+app.get('/api/debug/columns', async (req, res) => {
+    if (!mssqlPool || !connectionStatus.prm) {
+        return res.json({ error: 'PRM Database not connected' });
+    }
+    
+    try {
+        const result = await mssqlPool.request().query(`
+            SELECT COLUMN_NAME, DATA_TYPE 
+            FROM INFORMATION_SCHEMA.COLUMNS 
+            WHERE TABLE_NAME = 'DETAIL'
+        `);
+        res.json({
+            success: true,
+            columns: result.recordset
+        });
+    } catch (err) {
+        res.json({ error: err.message });
+    }
 });
 
 // Serve HTML page
@@ -457,7 +512,10 @@ async function startServer() {
     app.listen(port, () => {
         console.log(`\n🚀 Server running on http://localhost:${port}`);
         console.log(`📱 Open your browser and navigate to the URL above\n`);
-        console.log(`💡 Note: Database status shows ONLY if actually connected\n`);
+        console.log(`🔍 Debug URLs:`);
+        console.log(`   - Check all PRM records: http://localhost:${port}/api/prm/all`);
+        console.log(`   - Check DETAIL table structure: http://localhost:${port}/api/debug/columns`);
+        console.log(`   - Health check: http://localhost:${port}/api/health\n`);
     });
 }
 
