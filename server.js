@@ -182,6 +182,14 @@ async function initializeDatabases() {
     logToFile('');
 }
 
+// Mask PAN (show first 6 and last 4)
+function maskPAN(pan) {
+    if (!pan || pan.length < 10) return pan;
+    const panStr = pan.toString();
+    if (panStr.length <= 10) return panStr;
+    return `${panStr.substring(0, 6)}******${panStr.substring(panStr.length - 4)}`;
+}
+
 // Format JSON data
 function formatJSONData(jsonString) {
     if (!jsonString) return null;
@@ -191,14 +199,6 @@ function formatJSONData(jsonString) {
     } catch (e) {
         return { raw_value: jsonString, parse_error: e.message };
     }
-}
-
-// Mask PAN (show first 6 and last 4)
-function maskPAN(pan) {
-    if (!pan || pan.length < 10) return pan;
-    const panStr = pan.toString();
-    if (panStr.length <= 10) return panStr;
-    return `${panStr.substring(0, 6)}******${panStr.substring(panStr.length - 4)}`;
 }
 
 // PRM Query endpoint
@@ -276,7 +276,7 @@ app.post('/api/prm/query', async (req, res) => {
     }
 });
 
-// UPF Query endpoint (Oracle 1) - FIXED WITH CORRECT JSON PATHS
+// UPF Query endpoint (Oracle 1) - FIXED: Removed invalid columns, added correct JSON paths
 app.post('/api/upf/query', async (req, res) => {
     const { pan, rrn, stan } = req.body;
     let connection;
@@ -296,23 +296,8 @@ app.post('/api/upf/query', async (req, res) => {
     try {
         connection = await oracle1Pool.getConnection();
         
-        // Build query dynamically based on provided parameters
-        let query = `
-            SELECT 
-                stan,
-                msg_tp,
-                ext,
-                trx_dt,
-                trx_tm,
-                JSON_VALUE(ext, '$.AccptrCmpltnAdvc.CmpltnAdvc.Cntxt.SaleCntxt.SaleRefNb') as rrn,
-                JSON_VALUE(ext, '$.AccptrCmpltnAdvc.CmpltnAdvc.Envt.Card.PlainCardData.PAN') as pan_from_json,
-                JSON_VALUE(ext, '$.AccptrCmpltnAdvc.CmpltnAdvc.Cntxt.SaleCntxt.Amt') as amount,
-                JSON_VALUE(ext, '$.AccptrCmpltnAdvc.CmpltnAdvc.Cntxt.SaleCntxt.Ccy') as currency,
-                JSON_VALUE(ext, '$.AccptrCmpltnAdvc.CmpltnAdvc.Rspn.RspnCd') as response_code
-            FROM ep_log
-            WHERE msg_tp = 'AccptrCmpltnAdvc'
-        `;
-        
+        // Build query dynamically - using SELECT * like your working query
+        let query = `SELECT * FROM ep_log WHERE msg_tp = 'AccptrCmpltnAdvc'`;
         const params = {};
         
         // Add conditions based on what's provided
@@ -331,43 +316,62 @@ app.post('/api/upf/query', async (req, res) => {
             params.pan = pan;
         }
         
-        // If NO stan provided, don't filter by stan
-        // The query already has msg_tp filter only
+        // Add limit to prevent too many records
+        query += ` FETCH FIRST 100 ROWS ONLY`;
         
-        query += ` ORDER BY trx_dt DESC, trx_tm DESC`;
-        
-        console.log(`UPF Query - STAN: ${stan || 'NOT PROVIDED'}, RRN: ${rrn || 'NOT PROVIDED'}, PAN: ${pan || 'NOT PROVIDED'}`);
+        logToFile(`UPF Query - STAN: ${stan || 'NOT PROVIDED'}, RRN: ${rrn || 'NOT PROVIDED'}, PAN: ${pan || 'NOT PROVIDED'}`);
+        logToFile(`UPF Query SQL: ${query}`);
         
         const result = await connection.execute(query, params);
         
-        console.log(`UPF Query completed - Found ${result.rows.length} records`);
+        logToFile(`UPF Query completed - Found ${result.rows.length} records`);
         
+        // Process results - format data nicely
         const formattedData = [];
         
         for (const row of result.rows) {
-            const formattedRow = {
-                stan: row[0],
-                msg_tp: row[1],
-                transaction_date: row[3],
-                transaction_time: row[4],
-                rrn: row[5],
-                pan: row[6] ? maskPAN(row[6]) : null,
-                amount: row[7],
-                currency: row[8],
-                response_code: row[9]
-            };
+            const record = {};
             
-            // Parse and include full JSON data for reference
-            if (row[2]) {
-                try {
-                    const extJson = typeof row[2] === 'string' ? JSON.parse(row[2]) : row[2];
-                    formattedRow.full_json_data = extJson;
-                } catch (e) {
-                    formattedRow.full_json_data = { raw: row[2], parse_error: e.message };
-                }
+            // Map each column by its metadata name
+            if (result.metaData) {
+                result.metaData.forEach((col, index) => {
+                    let value = row[index];
+                    
+                    // Parse JSON if it's the ext column
+                    if (col.name === 'EXT' || col.name === 'ext') {
+                        if (value) {
+                            try {
+                                const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+                                record[col.name] = parsed;
+                                record.parsed_json = parsed;
+                                
+                                // Extract useful fields from JSON for easy display
+                                const saleRefNb = parsed?.AccptrCmpltnAdvc?.CmpltnAdvc?.Cntxt?.SaleCntxt?.SaleRefNb;
+                                const panFromJson = parsed?.AccptrCmpltnAdvc?.CmpltnAdvc?.Envt?.Card?.PlainCardData?.PAN;
+                                const amount = parsed?.AccptrCmpltnAdvc?.CmpltnAdvc?.Cntxt?.SaleCntxt?.Amt;
+                                const currency = parsed?.AccptrCmpltnAdvc?.CmpltnAdvc?.Cntxt?.SaleCntxt?.Ccy;
+                                const responseCode = parsed?.AccptrCmpltnAdvc?.CmpltnAdvc?.Rspn?.RspnCd;
+                                
+                                if (saleRefNb) record.extracted_rrn = saleRefNb;
+                                if (panFromJson) record.extracted_pan = maskPAN(panFromJson);
+                                if (amount) record.extracted_amount = amount;
+                                if (currency) record.extracted_currency = currency;
+                                if (responseCode) record.extracted_response_code = responseCode;
+                            } catch (e) {
+                                record[col.name] = value;
+                            }
+                        }
+                    } else {
+                        // Mask PAN column if it exists
+                        if ((col.name === 'PAN' || col.name === 'pan') && value) {
+                            value = maskPAN(value);
+                        }
+                        record[col.name] = value;
+                    }
+                });
             }
             
-            formattedData.push(formattedRow);
+            formattedData.push(record);
         }
         
         res.json({
@@ -375,12 +379,17 @@ app.post('/api/upf/query', async (req, res) => {
             database: 'UPF (Oracle 1)',
             data: formattedData,
             count: formattedData.length,
+            search_criteria: {
+                stan_provided: !!(stan && stan.trim()),
+                rrn_provided: !!(rrn && rrn.trim()),
+                pan_provided: !!(pan && pan.trim())
+            },
             connectionError: false,
             isConnected: true
         });
         
     } catch (err) {
-        console.error('UPF Query Error:', err);
+        logToFile('UPF Query Error: ' + err.message);
         res.json({
             success: false,
             database: 'UPF (Oracle 1)',
@@ -449,7 +458,7 @@ app.post('/api/eps/query', async (req, res) => {
                     if (value && typeof value === 'object' && value.toISOString) {
                         value = value.toISOString();
                     }
-                    if (col.name.toUpperCase() === 'PAN' && value) {
+                    if ((col.name.toUpperCase() === 'PAN' || col.name === 'pan') && value) {
                         value = maskPAN(value);
                     }
                     obj[col.name.toLowerCase()] = value;
@@ -532,7 +541,46 @@ app.get('/api/health', async (req, res) => {
     });
 });
 
-// Debug endpoints
+// Debug: Show actual columns in ep_log table
+app.get('/api/upf/debug-columns', async (req, res) => {
+    let connection;
+    try {
+        if (!oracle1Pool || !connectionStatus.upf) {
+            return res.json({ error: 'UPF Database not connected' });
+        }
+        
+        connection = await oracle1Pool.getConnection();
+        
+        const result = await connection.execute(`
+            SELECT COLUMN_NAME, DATA_TYPE 
+            FROM ALL_TAB_COLUMNS 
+            WHERE TABLE_NAME = 'EP_LOG' 
+            AND OWNER = USER
+            ORDER BY COLUMN_ID
+        `);
+        
+        const columns = result.rows.map(row => ({
+            name: row[0],
+            type: row[1]
+        }));
+        
+        const sample = await connection.execute(`SELECT * FROM ep_log WHERE ROWNUM = 1`);
+        
+        res.json({
+            success: true,
+            columns: columns,
+            sample_columns_metadata: sample.metaData,
+            sample_data: sample.rows[0] || null
+        });
+        
+    } catch (err) {
+        res.json({ error: err.message });
+    } finally {
+        if (connection) await connection.close();
+    }
+});
+
+// Debug: Show PRM table columns
 app.get('/api/prm/columns', async (req, res) => {
     if (!mssqlPool || !connectionStatus.prm) {
         return res.json({ error: 'PRM Database not connected' });
@@ -554,6 +602,7 @@ app.get('/api/prm/columns', async (req, res) => {
     }
 });
 
+// Debug: Show UPF tables
 app.get('/api/upf/tables', async (req, res) => {
     let connection;
     try {
@@ -594,6 +643,7 @@ async function startServer() {
         logToFile(`🔍 Debug Endpoints:`);
         logToFile(`   - PRM Columns: http://localhost:${port}/api/prm/columns`);
         logToFile(`   - UPF Tables: http://localhost:${port}/api/upf/tables`);
+        logToFile(`   - UPF Columns: http://localhost:${port}/api/upf/debug-columns`);
         logToFile(`   - Health Check: http://localhost:${port}/api/health\n`);
     });
 }
