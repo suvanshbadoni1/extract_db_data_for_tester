@@ -95,7 +95,7 @@
             cursor: not-allowed;
         }
 
-        /* Status Badges */
+        /* Status Badges - Only show when connected */
         .status-badge {
             position: fixed;
             top: 20px;
@@ -110,6 +110,35 @@
             font-size: 12px;
             border-radius: 20px;
             box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .status-badge .badge.connected {
+            background: #28a745;
+            animation: pulse 2s infinite;
+        }
+
+        .status-badge .badge.disconnected {
+            background: #dc3545;
+        }
+
+        .status-badge .badge.checking {
+            background: #ffc107;
+            color: #333;
+        }
+
+        @keyframes pulse {
+            0% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.8;
+            }
+            100% {
+                opacity: 1;
+            }
         }
 
         /* Result Cards */
@@ -128,6 +157,10 @@
             transition: transform 0.3s, box-shadow 0.3s;
             animation: fadeInUp 0.5s ease-out;
             height: fit-content;
+        }
+
+        .result-card.disconnected-card {
+            opacity: 0.7;
         }
 
         .result-card:hover {
@@ -160,6 +193,10 @@
         .card-header.upf { background: linear-gradient(135deg, #198754, #0a5c2e); }
         .card-header.eps { background: linear-gradient(135deg, #6f42c1, #5a2d8c); }
 
+        .card-header.prm.disconnected { background: linear-gradient(135deg, #6c757d, #495057); }
+        .card-header.upf.disconnected { background: linear-gradient(135deg, #6c757d, #495057); }
+        .card-header.eps.disconnected { background: linear-gradient(135deg, #6c757d, #495057); }
+
         .card-header h3 {
             margin: 0;
             font-size: 1.1rem;
@@ -173,6 +210,25 @@
             padding: 5px 12px;
             border-radius: 20px;
             font-size: 0.8rem;
+        }
+
+        .status-indicator {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 8px;
+            animation: pulse 1.5s infinite;
+        }
+
+        .status-indicator.online {
+            background: #28a745;
+            box-shadow: 0 0 5px #28a745;
+        }
+
+        .status-indicator.offline {
+            background: #dc3545;
+            animation: none;
         }
 
         .card-body {
@@ -237,15 +293,6 @@
             font-weight: 600;
         }
 
-        .json-viewer {
-            background: #f8f9fa;
-            border-radius: 8px;
-            padding: 15px;
-            font-family: 'Courier New', monospace;
-            font-size: 12px;
-            overflow-x: auto;
-        }
-
         .error-message {
             border-left: 4px solid #dc3545;
             background: #f8d7da;
@@ -260,26 +307,21 @@
             border-radius: 8px;
         }
 
-        /* Summary Bar */
-        .summary-bar {
-            background: white;
-            border-radius: 10px;
-            padding: 15px 20px;
-            margin-bottom: 20px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        }
-
-        /* Empty State */
-        .empty-state {
+        .disconnected-message {
+            border-left: 4px solid #ffc107;
+            background: #fff3cd;
+            padding: 15px;
+            border-radius: 8px;
             text-align: center;
-            padding: 40px;
-            color: #999;
         }
 
-        .empty-state i {
-            font-size: 48px;
-            margin-bottom: 15px;
-            opacity: 0.5;
+        .connection-details {
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 5px;
+            margin-top: 10px;
+            font-size: 12px;
+            font-family: monospace;
         }
 
         /* Responsive */
@@ -308,18 +350,8 @@
         <div class="loading-text">Searching across all databases...</div>
     </div>
 
-    <!-- Status Badges -->
-    <div class="status-badge" id="statusBadge">
-        <span class="badge bg-secondary" id="prmStatus">
-            <i class="fas fa-database"></i> PRM: Checking...
-        </span>
-        <span class="badge bg-secondary" id="upfStatus">
-            <i class="fas fa-cloud"></i> UPF: Checking...
-        </span>
-        <span class="badge bg-secondary" id="epsStatus">
-            <i class="fas fa-server"></i> EPS: Checking...
-        </span>
-    </div>
+    <!-- Status Badges - Only shows when connected -->
+    <div class="status-badge" id="statusBadge"></div>
 
     <div class="main-container">
         <!-- Header Card -->
@@ -379,20 +411,19 @@
         <div class="results-grid" id="resultsGrid">
             <!-- PRM Card -->
             <div class="result-card" id="prmCard">
-                <div class="card-header prm" data-bs-toggle="collapse" data-bs-target="#prmBody" style="cursor: pointer;">
+                <div class="card-header prm" id="prmHeader" data-bs-toggle="collapse" data-bs-target="#prmBody" style="cursor: pointer;">
                     <h3>
                         <i class="fas fa-database"></i>
                         PRM Database (MSSQL)
-                        <span class="badge-count" id="prmCount">Ready</span>
+                        <span class="badge-count" id="prmCount">Checking...</span>
                     </h3>
                     <i class="fas fa-chevron-down"></i>
                 </div>
                 <div class="collapse show" id="prmBody">
                     <div class="card-body" id="prmContent">
                         <div class="info-message">
-                            <i class="fas fa-info-circle"></i>
-                            <strong>Ready to search</strong><br>
-                            Enter PAN, RRN, and STAN above and click Search
+                            <i class="fas fa-spinner fa-spin"></i>
+                            <strong>Checking connection status...</strong>
                         </div>
                     </div>
                 </div>
@@ -400,20 +431,19 @@
 
             <!-- UPF Card -->
             <div class="result-card" id="upfCard">
-                <div class="card-header upf" data-bs-toggle="collapse" data-bs-target="#upfBody" style="cursor: pointer;">
+                <div class="card-header upf" id="upfHeader" data-bs-toggle="collapse" data-bs-target="#upfBody" style="cursor: pointer;">
                     <h3>
                         <i class="fas fa-cloud"></i>
                         UPF Database (Oracle 1)
-                        <span class="badge-count" id="upfCount">Ready</span>
+                        <span class="badge-count" id="upfCount">Checking...</span>
                     </h3>
                     <i class="fas fa-chevron-down"></i>
                 </div>
                 <div class="collapse show" id="upfBody">
                     <div class="card-body" id="upfContent">
                         <div class="info-message">
-                            <i class="fas fa-info-circle"></i>
-                            <strong>Ready to search</strong><br>
-                            Enter PAN, RRN, and STAN above and click Search
+                            <i class="fas fa-spinner fa-spin"></i>
+                            <strong>Checking connection status...</strong>
                         </div>
                     </div>
                 </div>
@@ -421,20 +451,19 @@
 
             <!-- EPS Card -->
             <div class="result-card" id="epsCard">
-                <div class="card-header eps" data-bs-toggle="collapse" data-bs-target="#epsBody" style="cursor: pointer;">
+                <div class="card-header eps" id="epsHeader" data-bs-toggle="collapse" data-bs-target="#epsBody" style="cursor: pointer;">
                     <h3>
                         <i class="fas fa-server"></i>
                         EPS PTLF Database (Oracle 2)
-                        <span class="badge-count" id="epsCount">Ready</span>
+                        <span class="badge-count" id="epsCount">Checking...</span>
                     </h3>
                     <i class="fas fa-chevron-down"></i>
                 </div>
                 <div class="collapse show" id="epsBody">
                     <div class="card-body" id="epsContent">
                         <div class="info-message">
-                            <i class="fas fa-info-circle"></i>
-                            <strong>Ready to search</strong><br>
-                            Enter PAN, RRN, and STAN above and click Search
+                            <i class="fas fa-spinner fa-spin"></i>
+                            <strong>Checking connection status...</strong>
                         </div>
                     </div>
                 </div>
@@ -447,6 +476,11 @@
     
     <script>
         const API_BASE = 'http://localhost:3000/api';
+        let connectionStatus = {
+            prm: false,
+            upf: false,
+            eps: false
+        };
         
         // Check database health on load
         async function checkHealth() {
@@ -454,25 +488,113 @@
                 const response = await fetch(`${API_BASE}/health`);
                 const health = await response.json();
                 
-                updateStatusBadge('prmStatus', health.prm, 'PRM');
-                updateStatusBadge('upfStatus', health.upf, 'UPF');
-                updateStatusBadge('epsStatus', health.eps, 'EPS');
+                connectionStatus.prm = health.prm;
+                connectionStatus.upf = health.upf;
+                connectionStatus.eps = health.eps;
+                
+                updateStatusUI();
+                updateDatabaseCards();
             } catch (error) {
                 console.error('Health check failed:', error);
-                updateStatusBadge('prmStatus', false, 'PRM');
-                updateStatusBadge('upfStatus', false, 'UPF');
-                updateStatusBadge('epsStatus', false, 'EPS');
+                connectionStatus.prm = false;
+                connectionStatus.upf = false;
+                connectionStatus.eps = false;
+                updateStatusUI();
+                updateDatabaseCards();
             }
         }
         
-        function updateStatusBadge(elementId, isConnected, dbName) {
-            const badge = document.getElementById(elementId);
-            if (isConnected) {
-                badge.className = 'badge bg-success';
-                badge.innerHTML = `<i class="fas fa-check-circle"></i> ${dbName}: Online`;
+        // Update status badges (only shows when connected)
+        function updateStatusUI() {
+            const statusContainer = document.getElementById('statusBadge');
+            const badges = [];
+            
+            // Only add badge if database is connected
+            if (connectionStatus.prm) {
+                badges.push(`
+                    <span class="badge connected">
+                        <i class="fas fa-check-circle"></i> PRM: Online
+                    </span>
+                `);
+            }
+            
+            if (connectionStatus.upf) {
+                badges.push(`
+                    <span class="badge connected">
+                        <i class="fas fa-check-circle"></i> UPF: Online
+                    </span>
+                `);
+            }
+            
+            if (connectionStatus.eps) {
+                badges.push(`
+                    <span class="badge connected">
+                        <i class="fas fa-check-circle"></i> EPS: Online
+                    </span>
+                `);
+            }
+            
+            // If no databases connected, show a warning
+            if (badges.length === 0) {
+                statusContainer.innerHTML = `
+                    <span class="badge disconnected">
+                        <i class="fas fa-exclamation-triangle"></i> No Databases Connected
+                    </span>
+                `;
             } else {
-                badge.className = 'badge bg-danger';
-                badge.innerHTML = `<i class="fas fa-exclamation-circle"></i> ${dbName}: Offline`;
+                statusContainer.innerHTML = badges.join('');
+            }
+        }
+        
+        // Update database cards based on connection status
+        function updateDatabaseCards() {
+            // Update PRM Card
+            updateCardConnection('prm', connectionStatus.prm, 'PRM (MSSQL)');
+            
+            // Update UPF Card
+            updateCardConnection('upf', connectionStatus.upf, 'UPF (Oracle 1)');
+            
+            // Update EPS Card
+            updateCardConnection('eps', connectionStatus.eps, 'EPS PTLF (Oracle 2)');
+        }
+        
+        function updateCardConnection(dbName, isConnected, displayName) {
+            const card = document.getElementById(`${dbName}Card`);
+            const header = document.getElementById(`${dbName}Header`);
+            const countSpan = document.getElementById(`${dbName}Count`);
+            const content = document.getElementById(`${dbName}Content`);
+            
+            if (isConnected) {
+                // Connected - Show normal state
+                card.classList.remove('disconnected-card');
+                header.classList.remove('disconnected');
+                countSpan.innerHTML = 'Ready';
+                countSpan.style.background = 'rgba(255,255,255,0.3)';
+                content.innerHTML = `
+                    <div class="info-message">
+                        <i class="fas fa-check-circle" style="color: #28a745;"></i>
+                        <strong>Database Connected</strong><br>
+                        Enter PAN, RRN, and STAN above and click Search to query records.
+                    </div>
+                `;
+            } else {
+                // Not connected - Show offline state
+                card.classList.add('disconnected-card');
+                header.classList.add('disconnected');
+                countSpan.innerHTML = 'Offline';
+                countSpan.style.background = '#dc3545';
+                content.innerHTML = `
+                    <div class="disconnected-message">
+                        <i class="fas fa-plug"></i>
+                        <strong>Database Not Connected</strong><br>
+                        The ${displayName} database is currently not available.<br>
+                        <small>Please check your database configuration and ensure the server is running.</small>
+                        <div class="connection-details mt-2">
+                            <strong>Connection Details:</strong><br>
+                            ${dbName === 'prm' ? 'MSSQL Server' : 'Oracle Server'} is not responding
+                        </div>
+                    </div>
+                `;
             }
         }
         
@@ -503,35 +625,35 @@
             return table;
         }
         
-        // Update card content
-        function updateCardContent(cardId, contentId, countId, result) {
-            const contentDiv = document.getElementById(contentId);
-            const countSpan = document.getElementById(countId);
+        // Update card with search results
+        function updateCardWithResults(dbName, result) {
+            const countSpan = document.getElementById(`${dbName}Count`);
+            const content = document.getElementById(`${dbName}Content`);
             
             if (!result.success) {
                 countSpan.innerHTML = 'Error';
                 countSpan.style.background = '#dc3545';
                 
-                let errorHtml = `
-                    <div class="error-message">
-                        <i class="fas fa-exclamation-circle"></i>
-                        <strong>Error:</strong><br>
-                        ${result.error || 'Unknown error occurred'}
-                    </div>
-                `;
-                
+                let errorHtml = '';
                 if (result.connectionError) {
                     errorHtml = `
-                        <div class="error-message">
+                        <div class="disconnected-message">
                             <i class="fas fa-plug"></i>
-                            <strong>Connection Error:</strong><br>
-                            ${result.error}<br><br>
-                            <small>Please check your database configuration and ensure the database server is running.</small>
+                            <strong>Connection Error</strong><br>
+                            ${result.error || 'Database connection failed'}<br>
+                            <small>Please check your database configuration.</small>
+                        </div>
+                    `;
+                } else {
+                    errorHtml = `
+                        <div class="error-message">
+                            <i class="fas fa-exclamation-circle"></i>
+                            <strong>Query Error:</strong><br>
+                            ${result.error || 'Unknown error occurred'}
                         </div>
                     `;
                 }
-                
-                contentDiv.innerHTML = errorHtml;
+                content.innerHTML = errorHtml;
                 return;
             }
             
@@ -541,7 +663,7 @@
                 countSpan.style.background = 'rgba(255,255,255,0.3)';
                 
                 const tableHtml = formatAsTable(result.data);
-                contentDiv.innerHTML = `
+                content.innerHTML = `
                     <div style="margin-bottom: 10px;">
                         <strong><i class="fas fa-chart-line"></i> Total Records Found:</strong> ${recordCount}
                     </div>
@@ -550,7 +672,7 @@
             } else {
                 countSpan.innerHTML = 'No Data';
                 countSpan.style.background = 'rgba(255,255,255,0.3)';
-                contentDiv.innerHTML = `
+                content.innerHTML = `
                     <div class="info-message">
                         <i class="fas fa-search"></i>
                         <strong>No records found</strong><br>
@@ -582,7 +704,8 @@
                     results[ep.name] = {
                         success: false,
                         error: `Network error: ${error.message}`,
-                        data: []
+                        data: [],
+                        connectionError: true
                     };
                 }
             }
@@ -629,10 +752,10 @@
             try {
                 const results = await searchAllDatabases(pan, rrn, stan);
                 
-                // Update each card
-                updateCardContent('prmCard', 'prmContent', 'prmCount', results.prm);
-                updateCardContent('upfCard', 'upfContent', 'upfCount', results.upf);
-                updateCardContent('epsCard', 'epsContent', 'epsCount', results.eps);
+                // Update each card with results
+                updateCardWithResults('prm', results.prm);
+                updateCardWithResults('upf', results.upf);
+                updateCardWithResults('eps', results.eps);
                 
                 // Scroll to results
                 document.getElementById('resultsGrid').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -654,22 +777,8 @@
             document.getElementById('rrn').value = '';
             document.getElementById('stan').value = '';
             
-            // Reset all cards to empty state
-            const emptyMessage = `
-                <div class="info-message">
-                    <i class="fas fa-info-circle"></i>
-                    <strong>Ready to search</strong><br>
-                    Enter PAN, RRN, and STAN above and click Search
-                </div>
-            `;
-            
-            document.getElementById('prmContent').innerHTML = emptyMessage;
-            document.getElementById('upfContent').innerHTML = emptyMessage;
-            document.getElementById('epsContent').innerHTML = emptyMessage;
-            
-            document.getElementById('prmCount').innerHTML = 'Ready';
-            document.getElementById('upfCount').innerHTML = 'Ready';
-            document.getElementById('epsCount').innerHTML = 'Ready';
+            // Reset all cards to connection status state
+            updateDatabaseCards();
         });
         
         // Input formatting
