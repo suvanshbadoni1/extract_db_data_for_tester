@@ -94,19 +94,10 @@ async function initializeDatabases() {
         console.log(`   PRM Version: ${testResult.recordset[0].version.substring(0, 60)}...`);
         console.log(`   Current Database: ${testResult.recordset[0].dbName}`);
         
-        // Check DETAIL table
-        try {
-            const tableCheck = await mssqlPool.request().query('SELECT TOP 1 * FROM [PRMNRT].[dbo].[DETAIL]');
-            console.log(`   ✅ DETAIL table is accessible`);
-        } catch (tableErr) {
-            console.log(`   ⚠️  DETAIL table check: ${tableErr.message}`);
-        }
-        
     } catch (err) {
         connectionStatus.prm = false;
         connectionStatus.prmError = err.message;
         console.log('❌ PRM (MSSQL) Database - Connection failed:', err.message);
-        if (err.code) console.log(`   Error Code: ${err.code}`);
     }
     
     // Initialize UPF (Oracle 1)
@@ -115,7 +106,6 @@ async function initializeDatabases() {
         console.log(`   Connect String: ${oracle1Config.connectString}`);
         console.log(`   User: ${oracle1Config.user}`);
         
-        // Initialize Oracle client if path provided
         if (process.env.ORACLE_CLIENT_PATH) {
             oracledb.initOracleClient({ libDir: process.env.ORACLE_CLIENT_PATH });
         }
@@ -131,6 +121,16 @@ async function initializeDatabases() {
         connectionStatus.upfError = null;
         console.log('✅ UPF (Oracle 1) Database - Connected successfully');
         console.log(`   Connected as: ${result.rows[0][0]}`);
+        
+        // Check ep_log table exists
+        let checkConn = await oracle1Pool.getConnection();
+        try {
+            const tableCheck = await checkConn.execute(`SELECT COUNT(*) FROM ep_log WHERE ROWNUM = 1`);
+            console.log(`   ✅ ep_log table is accessible`);
+        } catch (tableErr) {
+            console.log(`   ⚠️  ep_log table check: ${tableErr.message}`);
+        }
+        await checkConn.close();
         
     } catch (err) {
         connectionStatus.upf = false;
@@ -148,7 +148,6 @@ async function initializeDatabases() {
         
         oracle2Pool = await oracledb.createPool(oracle2Config);
         
-        // Test the connection
         let testConn = await oracle2Pool.getConnection();
         await testConn.execute('SELECT 1 FROM DUAL');
         await testConn.close();
@@ -169,18 +168,23 @@ async function initializeDatabases() {
     console.log(`   PRM (MSSQL): ${connectionStatus.prm ? '🟢 Online' : '🔴 Offline'}`);
     console.log(`   UPF (Oracle): ${connectionStatus.upf ? '🟢 Online' : '🔴 Offline'}`);
     console.log(`   EPS (Oracle): ${connectionStatus.eps ? '🟢 Online' : '🔴 Offline'}`);
-    
-    if (connectionStatus.upfError) {
-        console.log(`\n💡 UPF Connection Tips:`);
-        console.log(`   1. Verify the service name is correct (UPFDB)`);
-        console.log(`   2. Check if the Oracle listener is running on port 1521`);
-        console.log(`   3. Ensure the database is accessible from this server`);
-        console.log(`   4. Try using the full connection string: //10.230.195.68:1521/UPFDB`);
-    }
     console.log();
 }
 
-// PRM Query endpoint - Query DETAIL table
+// Function to format JSON data beautifully
+function formatJSONData(jsonString) {
+    if (!jsonString) return null;
+    try {
+        // If it's already an object, return it
+        if (typeof jsonString === 'object') return jsonString;
+        // Otherwise parse it
+        return JSON.parse(jsonString);
+    } catch (e) {
+        return { raw_value: jsonString, parse_error: e.message };
+    }
+}
+
+// PRM Query endpoint - Using actual table and columns
 app.post('/api/prm/query', async (req, res) => {
     const { pan, rrn, stan } = req.body;
     
@@ -197,7 +201,7 @@ app.post('/api/prm/query', async (req, res) => {
     }
     
     try {
-        // Query your DETAIL table - Adjust column names as needed
+        // Query using actual column names: sd_pan for PAN, SD_REF_NUM for RRN
         let query = `
             SELECT * 
             FROM [PRMNRT].[dbo].[DETAIL]
@@ -206,19 +210,18 @@ app.post('/api/prm/query', async (req, res) => {
         
         const request = mssqlPool.request();
         
-        // Add conditions if parameters are provided
         if (pan && pan.trim()) {
-            query += ` AND (PAN = @pan OR CardNumber = @pan)`;
+            query += ` AND sd_pan = @pan`;
             request.input('pan', sql.VarChar, pan);
         }
         
         if (rrn && rrn.trim()) {
-            query += ` AND (RRN = @rrn OR RetrievalReferenceNumber = @rrn)`;
+            query += ` AND SD_REF_NUM = @rrn`;
             request.input('rrn', sql.VarChar, rrn);
         }
         
         if (stan && stan.trim()) {
-            query += ` AND (STAN = @stan OR SystemTraceAuditNumber = @stan)`;
+            query += ` AND stan = @stan`;
             request.input('stan', sql.VarChar, stan);
         }
         
@@ -228,11 +231,25 @@ app.post('/api/prm/query', async (req, res) => {
         
         console.log(`PRM Query completed - Found ${result.recordset.length} records`);
         
+        // Process the results - format any JSON fields
+        const formattedData = result.recordset.map(record => {
+            const formatted = {};
+            for (const [key, value] of Object.entries(record)) {
+                // Check if value looks like JSON
+                if (typeof value === 'string' && (value.startsWith('{') || value.startsWith('['))) {
+                    formatted[key] = formatJSONData(value);
+                } else {
+                    formatted[key] = value;
+                }
+            }
+            return formatted;
+        });
+        
         res.json({
             success: true,
             database: 'PRM (MSSQL)',
-            data: result.recordset,
-            count: result.recordset.length,
+            data: formattedData,
+            count: formattedData.length,
             connectionError: false,
             isConnected: true
         });
@@ -250,7 +267,7 @@ app.post('/api/prm/query', async (req, res) => {
     }
 });
 
-// UPF Query endpoint (Oracle 1)
+// UPF Query endpoint (Oracle 1) - Using ep_log table
 app.post('/api/upf/query', async (req, res) => {
     const { pan, rrn, stan } = req.body;
     let connection;
@@ -259,7 +276,7 @@ app.post('/api/upf/query', async (req, res) => {
         return res.json({
             success: false,
             database: 'UPF (Oracle 1)',
-            error: connectionStatus.upfError || 'UPF Database is not connected. Please check your Oracle configuration.',
+            error: connectionStatus.upfError || 'UPF Database is not connected',
             data: [],
             count: 0,
             connectionError: true,
@@ -270,111 +287,89 @@ app.post('/api/upf/query', async (req, res) => {
     try {
         connection = await oracle1Pool.getConnection();
         
-        // First, let's get all table names to help debug
+        // Build query based on provided parameters
         let query = `
-            SELECT * FROM user_tables
+            SELECT 
+                stan,
+                msg_tp,
+                ext,
+                trx_dt,
+                trx_tm,
+                pan as masked_pan,
+                JSON_VALUE(ext, '$.AccptrCmpltnAdvc.CmpltnAdvc.Cntxt.SaleCntxt.SaleRefNb') as rrn,
+                JSON_VALUE(ext, '$.AccptrCmpltnAdvc.CmpltnAdvc.Cntxt.SaleCntxt.PAN') as pan_from_json,
+                JSON_VALUE(ext, '$.AccptrCmpltnAdvc.CmpltnAdvc.Cntxt.SaleCntxt.Amt') as amount,
+                JSON_VALUE(ext, '$.AccptrCmpltnAdvc.CmpltnAdvc.Cntxt.SaleCntxt.Ccy') as currency,
+                JSON_VALUE(ext, '$.AccptrCmpltnAdvc.CmpltnAdvc.Rspn.RspnCd') as response_code
+            FROM ep_log
+            WHERE 1=1
         `;
         
-        // If we have parameters, try to find transaction tables
-        // Adjust this query based on your actual table structure
-        let searchQuery = `
-            SELECT * FROM (
-                SELECT 'UPF_Transactions' as Source, t.* FROM UPF_Transactions t
-                UNION ALL
-                SELECT 'UPF_Records' as Source, r.* FROM UPF_Records r
-                UNION ALL
-                SELECT 'UPF_Log' as Source, l.* FROM UPF_Log l
-            ) data
-            WHERE 1=0
-        `;
+        const params = {};
         
-        // If parameters provided, search in common tables
-        if (pan || rrn || stan) {
-            searchQuery = `
-                SELECT * FROM (
-                    SELECT 'UPF_Transactions' as Source, t.* FROM UPF_Transactions t
-                    UNION ALL
-                    SELECT 'UPF_Records' as Source, r.* FROM UPF_Records r
-                ) data
-                WHERE 1=1
-            `;
-            
-            const params = {};
-            if (pan && pan.trim()) {
-                searchQuery += ` AND (PAN = :pan OR CARD_NUMBER = :pan)`;
-                params.pan = pan;
-            }
-            if (rrn && rrn.trim()) {
-                searchQuery += ` AND (RRN = :rrn OR RETRIEVAL_REF = :rrn)`;
-                params.rrn = rrn;
-            }
-            if (stan && stan.trim()) {
-                searchQuery += ` AND (STAN = :stan OR STAN_NUMBER = :stan)`;
-                params.stan = stan;
-            }
-            
-            console.log(`UPF Query - PAN: ${pan}, RRN: ${rrn}, STAN: ${stan}`);
-            
-            try {
-                const result = await connection.execute(searchQuery, params);
-                
-                // Format Oracle data
-                const formattedData = result.rows.map(row => {
-                    const obj = {};
-                    if (result.metaData) {
-                        result.metaData.forEach((col, index) => {
-                            let value = row[index];
-                            if (value && typeof value === 'object' && value.toISOString) {
-                                value = value.toISOString();
-                            }
-                            obj[col.name.toLowerCase()] = value;
-                        });
-                    }
-                    return obj;
-                });
-                
-                res.json({
-                    success: true,
-                    database: 'UPF (Oracle 1)',
-                    data: formattedData,
-                    count: formattedData.length,
-                    connectionError: false,
-                    isConnected: true
-                });
-            } catch (searchErr) {
-                // If tables don't exist, return sample data for testing
-                console.log('UPF Tables not found, returning sample data');
-                res.json({
-                    success: true,
-                    database: 'UPF (Oracle 1)',
-                    data: [{
-                        source: 'Sample Data',
-                        message: 'Connected to UPF but no transaction tables found. Please update the query with correct table names.',
-                        pan: pan,
-                        rrn: rrn,
-                        stan: stan,
-                        connection_status: 'Connected - Ready for queries'
-                    }],
-                    count: 1,
-                    connectionError: false,
-                    isConnected: true
-                });
-            }
-        } else {
-            // If no parameters, just return connection status
-            res.json({
-                success: true,
-                database: 'UPF (Oracle 1)',
-                data: [{
-                    message: 'UPF Database is connected and ready',
-                    user: await connection.execute('SELECT USER FROM DUAL').then(r => r.rows[0][0]),
-                    timestamp: new Date().toISOString()
-                }],
-                count: 1,
-                connectionError: false,
-                isConnected: true
-            });
+        if (stan && stan.trim()) {
+            query += ` AND stan = :stan`;
+            params.stan = stan;
         }
+        
+        if (rrn && rrn.trim()) {
+            query += ` AND JSON_VALUE(ext, '$.AccptrCmpltnAdvc.CmpltnAdvc.Cntxt.SaleCntxt.SaleRefNb') = :rrn`;
+            params.rrn = rrn;
+        }
+        
+        if (pan && pan.trim()) {
+            // PAN might be masked or full - search in JSON
+            query += ` AND (pan = :pan OR JSON_VALUE(ext, '$.AccptrCmpltnAdvc.CmpltnAdvc.Cntxt.SaleCntxt.PAN') LIKE :panPattern)`;
+            params.pan = pan;
+            params.panPattern = `%${pan}%`;
+        }
+        
+        query += ` ORDER BY trx_dt DESC, trx_tm DESC`;
+        
+        console.log(`UPF Query - STAN: ${stan}, RRN: ${rrn}, PAN: ${pan}`);
+        
+        const result = await connection.execute(query, params);
+        
+        // Format the results with parsed JSON
+        const formattedData = [];
+        
+        for (const row of result.rows) {
+            const formattedRow = {
+                stan: row[0],
+                msg_tp: row[1],
+                trx_dt: row[2],
+                trx_tm: row[3],
+                masked_pan: row[4] ? maskPAN(row[4]) : null,
+                rrn: row[5],
+                pan_from_json: row[6] ? maskPAN(row[6]) : null,
+                amount: row[7],
+                currency: row[8],
+                response_code: row[9],
+                // Full JSON data parsed
+                full_json_data: formatJSONData(row[1] === 'AccptrCmpltnAdvc' ? row[2] : null)
+            };
+            
+            // Parse the entire ext JSON if exists
+            if (row[2]) {
+                const parsedJSON = formatJSONData(row[2]);
+                if (parsedJSON && typeof parsedJSON === 'object') {
+                    formattedRow.parsed_ext_json = parsedJSON;
+                }
+            }
+            
+            formattedData.push(formattedRow);
+        }
+        
+        console.log(`UPF Query completed - Found ${formattedData.length} records`);
+        
+        res.json({
+            success: true,
+            database: 'UPF (Oracle 1)',
+            data: formattedData,
+            count: formattedData.length,
+            connectionError: false,
+            isConnected: true
+        });
         
     } catch (err) {
         console.error('UPF Query Error:', err);
@@ -392,6 +387,14 @@ app.post('/api/upf/query', async (req, res) => {
     }
 });
 
+// Helper function to mask PAN (show first 6 and last 4)
+function maskPAN(pan) {
+    if (!pan || pan.length < 10) return pan;
+    const panStr = pan.toString();
+    if (panStr.length <= 10) return panStr;
+    return `${panStr.substring(0, 6)}******${panStr.substring(panStr.length - 4)}`;
+}
+
 // EPS Query endpoint (Oracle 2)
 app.post('/api/eps/query', async (req, res) => {
     const { pan, rrn, stan } = req.body;
@@ -401,7 +404,7 @@ app.post('/api/eps/query', async (req, res) => {
         return res.json({
             success: false,
             database: 'EPS PTLF (Oracle 2)',
-            error: connectionStatus.epsError || 'EPS Database is not connected. Please check your Oracle configuration.',
+            error: connectionStatus.epsError || 'EPS Database is not connected',
             data: [],
             count: 0,
             connectionError: true,
@@ -412,89 +415,65 @@ app.post('/api/eps/query', async (req, res) => {
     try {
         connection = await oracle2Pool.getConnection();
         
-        // Similar query structure for EPS
+        // Basic query for EPS - Update based on actual table structure
         let query = `
-            SELECT * FROM (
-                SELECT 'EPS_Records' as Source, e.* FROM EPS_Records e
-                UNION ALL
-                SELECT 'EPS_Transactions' as Source, t.* FROM EPS_Transactions t
-            ) data
-            WHERE 1=0
+            SELECT * FROM EPS_PTLF_RECORDS
+            WHERE 1=1
         `;
         
-        if (pan || rrn || stan) {
-            query = `
-                SELECT * FROM EPS_Records
-                WHERE 1=1
-            `;
-            
-            const params = {};
-            if (pan && pan.trim()) {
-                query += ` AND (PAN = :pan OR CARD_NUMBER = :pan)`;
-                params.pan = pan;
-            }
-            if (rrn && rrn.trim()) {
-                query += ` AND (RRN = :rrn OR RETRIEVAL_REF = :rrn)`;
-                params.rrn = rrn;
-            }
-            if (stan && stan.trim()) {
-                query += ` AND (STAN = :stan OR STAN_NUMBER = :stan)`;
-                params.stan = stan;
-            }
-            
-            try {
-                const result = await connection.execute(query, params);
-                const formattedData = result.rows.map((row, idx) => {
-                    const obj = { record_number: idx + 1 };
-                    if (result.metaData) {
-                        result.metaData.forEach((col, index) => {
-                            let value = row[index];
-                            if (value && typeof value === 'object' && value.toISOString) {
-                                value = value.toISOString();
-                            }
-                            obj[col.name.toLowerCase()] = value;
-                        });
-                    }
-                    return obj;
-                });
-                
-                res.json({
-                    success: true,
-                    database: 'EPS PTLF (Oracle 2)',
-                    data: formattedData,
-                    count: formattedData.length,
-                    connectionError: false,
-                    isConnected: true
-                });
-            } catch (searchErr) {
-                res.json({
-                    success: true,
-                    database: 'EPS PTLF (Oracle 2)',
-                    data: [{
-                        message: 'Connected to EPS but no transaction tables found',
-                        status: 'Ready for queries',
-                        pan: pan,
-                        rrn: rrn,
-                        stan: stan
-                    }],
-                    count: 1,
-                    connectionError: false,
-                    isConnected: true
-                });
-            }
-        } else {
-            res.json({
-                success: true,
-                database: 'EPS PTLF (Oracle 2)',
-                data: [{
-                    message: 'EPS Database is connected and ready',
-                    timestamp: new Date().toISOString()
-                }],
-                count: 1,
-                connectionError: false,
-                isConnected: true
-            });
+        const params = {};
+        
+        if (pan && pan.trim()) {
+            query += ` AND PAN = :pan`;
+            params.pan = pan;
         }
+        
+        if (rrn && rrn.trim()) {
+            query += ` AND RRN = :rrn`;
+            params.rrn = rrn;
+        }
+        
+        if (stan && stan.trim()) {
+            query += ` AND STAN = :stan`;
+            params.stan = stan;
+        }
+        
+        // If no specific query, return limited records
+        if (Object.keys(params).length === 0) {
+            query = `SELECT * FROM EPS_PTLF_RECORDS WHERE ROWNUM <= 10`;
+        }
+        
+        console.log(`EPS Query - PAN: ${pan}, RRN: ${rrn}, STAN: ${stan}`);
+        
+        const result = await connection.execute(query, params);
+        
+        // Format Oracle data
+        const formattedData = result.rows.map(row => {
+            const obj = {};
+            if (result.metaData) {
+                result.metaData.forEach((col, index) => {
+                    let value = row[index];
+                    if (value && typeof value === 'object' && value.toISOString) {
+                        value = value.toISOString();
+                    }
+                    // Mask PAN if found
+                    if (col.name.toUpperCase() === 'PAN' && value) {
+                        value = maskPAN(value);
+                    }
+                    obj[col.name.toLowerCase()] = value;
+                });
+            }
+            return obj;
+        });
+        
+        res.json({
+            success: true,
+            database: 'EPS PTLF (Oracle 2)',
+            data: formattedData,
+            count: formattedData.length,
+            connectionError: false,
+            isConnected: true
+        });
         
     } catch (err) {
         console.error('EPS Query Error:', err);
@@ -512,7 +491,28 @@ app.post('/api/eps/query', async (req, res) => {
     }
 });
 
-// Debug endpoint to list UPF tables
+// Debug endpoints
+app.get('/api/prm/columns', async (req, res) => {
+    if (!mssqlPool || !connectionStatus.prm) {
+        return res.json({ error: 'PRM Database not connected' });
+    }
+    
+    try {
+        const result = await mssqlPool.request().query(`
+            SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH
+            FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_NAME = 'DETAIL'
+            ORDER BY ORDINAL_POSITION
+        `);
+        res.json({
+            success: true,
+            columns: result.recordset
+        });
+    } catch (err) {
+        res.json({ error: err.message });
+    }
+});
+
 app.get('/api/upf/tables', async (req, res) => {
     let connection;
     try {
@@ -543,39 +543,29 @@ app.get('/api/health', async (req, res) => {
     let prmAlive = false;
     let upfAlive = false;
     let epsAlive = false;
-    let upfTables = [];
     
-    // Check PRM
     if (mssqlPool && connectionStatus.prm) {
         try {
             await mssqlPool.request().query('SELECT 1');
             prmAlive = true;
         } catch (err) {
             prmAlive = false;
-            connectionStatus.prm = false;
         }
     }
     
-    // Check UPF
     if (oracle1Pool && connectionStatus.upf) {
         let conn;
         try {
             conn = await oracle1Pool.getConnection();
             await conn.execute('SELECT 1 FROM DUAL');
             upfAlive = true;
-            
-            // Get list of tables for debugging
-            const tables = await conn.execute(`SELECT table_name FROM user_tables WHERE ROWNUM <= 10`);
-            upfTables = tables.rows.map(row => row[0]);
         } catch (err) {
             upfAlive = false;
-            connectionStatus.upf = false;
         } finally {
             if (conn) await conn.close();
         }
     }
     
-    // Check EPS
     if (oracle2Pool && connectionStatus.eps) {
         let conn;
         try {
@@ -584,7 +574,6 @@ app.get('/api/health', async (req, res) => {
             epsAlive = true;
         } catch (err) {
             epsAlive = false;
-            connectionStatus.eps = false;
         } finally {
             if (conn) await conn.close();
         }
@@ -594,49 +583,8 @@ app.get('/api/health', async (req, res) => {
         prm: prmAlive,
         upf: upfAlive,
         eps: epsAlive,
-        upfTables: upfTables,
         timestamp: new Date().toISOString()
     });
-});
-
-// Get PRM table structure
-app.get('/api/prm/columns', async (req, res) => {
-    if (!mssqlPool || !connectionStatus.prm) {
-        return res.json({ error: 'PRM Database not connected' });
-    }
-    
-    try {
-        const result = await mssqlPool.request().query(`
-            SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH
-            FROM INFORMATION_SCHEMA.COLUMNS
-            WHERE TABLE_NAME = 'DETAIL'
-            ORDER BY ORDINAL_POSITION
-        `);
-        res.json({
-            success: true,
-            columns: result.recordset
-        });
-    } catch (err) {
-        res.json({ error: err.message });
-    }
-});
-
-// Get sample PRM data
-app.get('/api/prm/sample', async (req, res) => {
-    if (!mssqlPool || !connectionStatus.prm) {
-        return res.json({ error: 'PRM Database not connected' });
-    }
-    
-    try {
-        const result = await mssqlPool.request().query('SELECT TOP 5 * FROM [PRMNRT].[dbo].[DETAIL]');
-        res.json({
-            success: true,
-            data: result.recordset,
-            count: result.recordset.length
-        });
-    } catch (err) {
-        res.json({ error: err.message });
-    }
 });
 
 // Serve HTML page
@@ -652,8 +600,7 @@ async function startServer() {
         console.log(`\n🚀 Server running on http://localhost:${port}`);
         console.log(`📱 Open your browser to use the application\n`);
         console.log(`🔍 Debug Endpoints:`);
-        console.log(`   - PRM Sample Data: http://localhost:${port}/api/prm/sample`);
-        console.log(`   - PRM Table Structure: http://localhost:${port}/api/prm/columns`);
+        console.log(`   - PRM Columns: http://localhost:${port}/api/prm/columns`);
         console.log(`   - UPF Tables: http://localhost:${port}/api/upf/tables`);
         console.log(`   - Health Check: http://localhost:${port}/api/health\n`);
     });
