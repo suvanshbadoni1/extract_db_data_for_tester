@@ -276,7 +276,7 @@ app.post('/api/prm/query', async (req, res) => {
     }
 });
 
-// UPF Query endpoint (Oracle 1) - FIXED: Removed invalid columns, added correct JSON paths
+// UPF Query endpoint (Oracle 1) - FIXED for Masked PAN
 app.post('/api/upf/query', async (req, res) => {
     const { pan, rrn, stan } = req.body;
     let connection;
@@ -312,15 +312,21 @@ app.post('/api/upf/query', async (req, res) => {
         }
         
         if (pan && pan.trim()) {
-            query += ` AND JSON_VALUE(ext, '$.AccptrCmpltnAdvc.CmpltnAdvc.Envt.Card.PlainCardData.PAN') = :pan`;
-            params.pan = pan;
+            // For PAN, we need to search within the JSON field since the column PAN is masked
+            // Convert full PAN to masked format for comparison
+            let maskedPan = pan;
+            if (pan.length === 16) {
+                maskedPan = `${pan.substring(0, 6)}******${pan.substring(pan.length - 4)}`;
+            }
+            query += ` AND JSON_VALUE(ext, '$.AccptrCmpltnAdvc.CmpltnAdvc.Envt.Card.PlainCardData.PAN') LIKE :panPattern`;
+            params.panPattern = `%${maskedPan}%`;
+            console.log(`Searching for masked PAN: ${maskedPan}`);
         }
         
         // Add limit to prevent too many records
         query += ` FETCH FIRST 100 ROWS ONLY`;
         
         logToFile(`UPF Query - STAN: ${stan || 'NOT PROVIDED'}, RRN: ${rrn || 'NOT PROVIDED'}, PAN: ${pan || 'NOT PROVIDED'}`);
-        logToFile(`UPF Query SQL: ${query}`);
         
         const result = await connection.execute(query, params);
         
@@ -353,7 +359,10 @@ app.post('/api/upf/query', async (req, res) => {
                                 const responseCode = parsed?.AccptrCmpltnAdvc?.CmpltnAdvc?.Rspn?.RspnCd;
                                 
                                 if (saleRefNb) record.extracted_rrn = saleRefNb;
-                                if (panFromJson) record.extracted_pan = maskPAN(panFromJson);
+                                if (panFromJson) {
+                                    // Show the PAN as is (it's already masked in the JSON)
+                                    record.extracted_pan = panFromJson;
+                                }
                                 if (amount) record.extracted_amount = amount;
                                 if (currency) record.extracted_currency = currency;
                                 if (responseCode) record.extracted_response_code = responseCode;
@@ -362,11 +371,12 @@ app.post('/api/upf/query', async (req, res) => {
                             }
                         }
                     } else {
-                        // Mask PAN column if it exists
+                        // For PAN column, it's already masked in the database
                         if ((col.name === 'PAN' || col.name === 'pan') && value) {
-                            value = maskPAN(value);
+                            record[col.name] = value; // Keep as is (already masked)
+                        } else {
+                            record[col.name] = value;
                         }
-                        record[col.name] = value;
                     }
                 });
             }
@@ -382,8 +392,10 @@ app.post('/api/upf/query', async (req, res) => {
             search_criteria: {
                 stan_provided: !!(stan && stan.trim()),
                 rrn_provided: !!(rrn && rrn.trim()),
-                pan_provided: !!(pan && pan.trim())
+                pan_provided: !!(pan && pan.trim()),
+                pan_used_for_search: pan && pan.trim() ? (pan.length === 16 ? `${pan.substring(0, 6)}******${pan.substring(pan.length - 4)}` : pan) : null
             },
+            note: "PAN is masked in UPF database (first 6 and last 4 only). Searching using masked format.",
             connectionError: false,
             isConnected: true
         });
