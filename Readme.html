@@ -1,0 +1,805 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PTLF Parser & Multi-Database Search System - Complete Documentation</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --prm-color: #0d6efd;
+            --upf-color: #198754;
+            --eps-color: #6f42c1;
+            --parser-color: #fd7e14;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            padding: 20px;
+        }
+
+        .main-container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        /* Header */
+        .header-card {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+            margin-bottom: 30px;
+        }
+
+        .header-gradient {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 40px;
+            text-align: center;
+        }
+
+        .header-gradient h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+        }
+
+        .badge-container {
+            margin-top: 15px;
+        }
+
+        .badge-container .badge {
+            margin: 0 5px;
+            padding: 8px 15px;
+            font-size: 14px;
+        }
+
+        /* Navigation Tabs */
+        .nav-tabs-custom {
+            background: white;
+            padding: 0 20px;
+            border-bottom: 2px solid #e0e0e0;
+        }
+
+        .nav-tabs-custom .nav-link {
+            border: none;
+            color: #666;
+            font-weight: 600;
+            padding: 15px 25px;
+            transition: all 0.3s;
+        }
+
+        .nav-tabs-custom .nav-link:hover {
+            color: #667eea;
+            background: transparent;
+        }
+
+        .nav-tabs-custom .nav-link.active {
+            color: #667eea;
+            border-bottom: 3px solid #667eea;
+            background: transparent;
+        }
+
+        /* Content Sections */
+        .content-section {
+            background: white;
+            border-radius: 0 0 20px 20px;
+            padding: 30px;
+            margin-bottom: 30px;
+        }
+
+        .section-title {
+            font-size: 1.8rem;
+            margin-bottom: 25px;
+            color: #333;
+            border-left: 4px solid #667eea;
+            padding-left: 15px;
+        }
+
+        .section-subtitle {
+            font-size: 1.3rem;
+            margin: 20px 0 15px 0;
+            color: #555;
+        }
+
+        /* Cards */
+        .info-card {
+            background: #f8f9fa;
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-left: 4px solid #667eea;
+            transition: transform 0.2s;
+        }
+
+        .info-card:hover {
+            transform: translateX(5px);
+        }
+
+        .db-card {
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-top: 4px solid;
+        }
+
+        .db-card.prm { border-top-color: var(--prm-color); }
+        .db-card.upf { border-top-color: var(--upf-color); }
+        .db-card.eps { border-top-color: var(--eps-color); }
+
+        /* Code Blocks */
+        .code-block {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 15px;
+            border-radius: 10px;
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+            font-size: 13px;
+            overflow-x: auto;
+            margin: 15px 0;
+        }
+
+        .code-block.json {
+            background: #282c34;
+        }
+
+        .json-key { color: #9cdcfe; }
+        .json-string { color: #ce9178; }
+        .json-number { color: #b5cea8; }
+        .json-bracket { color: #ffd700; }
+
+        /* Tables */
+        .custom-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+        }
+
+        .custom-table th {
+            background: #667eea;
+            color: white;
+            padding: 12px;
+            text-align: left;
+        }
+
+        .custom-table td {
+            padding: 10px 12px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .custom-table tr:hover {
+            background: #f5f5f5;
+        }
+
+        /* Flow Diagram */
+        .flow-diagram {
+            background: #f8f9fa;
+            border-radius: 15px;
+            padding: 30px;
+            text-align: center;
+            margin: 20px 0;
+        }
+
+        .flow-step {
+            display: inline-block;
+            background: white;
+            border-radius: 10px;
+            padding: 15px 20px;
+            margin: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            min-width: 150px;
+        }
+
+        .flow-arrow {
+            display: inline-block;
+            font-size: 24px;
+            color: #667eea;
+            margin: 0 10px;
+        }
+
+        /* Token Structure */
+        .token-structure {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 20px;
+            font-family: monospace;
+            font-size: 14px;
+            overflow-x: auto;
+        }
+
+        .token-part {
+            display: inline-block;
+            padding: 5px 10px;
+            margin: 2px;
+            border-radius: 5px;
+        }
+
+        .token-marker { background: #ffcdd2; color: #c62828; }
+        .token-id { background: #c8e6c9; color: #2e7d32; }
+        .token-length { background: #bbdefb; color: #1565c0; }
+        .token-value { background: #fff9c4; color: #f57f17; }
+
+        /* Alert Boxes */
+        .alert-custom {
+            background: #e7f3ff;
+            border-left: 4px solid #0d6efd;
+            padding: 15px;
+            border-radius: 10px;
+            margin: 15px 0;
+        }
+
+        .alert-custom.warning {
+            background: #fff3cd;
+            border-left-color: #ffc107;
+        }
+
+        .alert-custom.success {
+            background: #d4edda;
+            border-left-color: #28a745;
+        }
+
+        /* Footer */
+        .footer {
+            text-align: center;
+            padding: 20px;
+            color: white;
+            margin-top: 30px;
+        }
+
+        @media (max-width: 768px) {
+            .flow-step {
+                display: block;
+                margin: 10px auto;
+            }
+            .flow-arrow {
+                display: block;
+                transform: rotate(90deg);
+                margin: 5px 0;
+            }
+            .custom-table th, .custom-table td {
+                font-size: 12px;
+                padding: 8px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="main-container">
+        <!-- Header -->
+        <div class="header-card">
+            <div class="header-gradient">
+                <h1><i class="fas fa-code-branch"></i> PTLF Parser & Multi-Database Search</h1>
+                <p>Complete Technical Documentation - Payment Transaction Logging Format (PTLF) Parser</p>
+                <div class="badge-container">
+                    <span class="badge bg-primary"><i class="fas fa-database"></i> PRM (MSSQL)</span>
+                    <span class="badge bg-success"><i class="fas fa-cloud"></i> UPF (Oracle)</span>
+                    <span class="badge bg-warning"><i class="fas fa-server"></i> EPS (Oracle)</span>
+                    <span class="badge bg-info"><i class="fas fa-code"></i> PTLF Parser</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Navigation Tabs -->
+        <ul class="nav nav-tabs nav-tabs-custom" id="docTabs" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="overview-tab" data-bs-toggle="tab" data-bs-target="#overview" type="button" role="tab">
+                    <i class="fas fa-info-circle"></i> Overview
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="architecture-tab" data-bs-toggle="tab" data-bs-target="#architecture" type="button" role="tab">
+                    <i class="fas fa-project-diagram"></i> Architecture
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="databases-tab" data-bs-toggle="tab" data-bs-target="#databases" type="button" role="tab">
+                    <i class="fas fa-database"></i> Databases
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="ptlf-tab" data-bs-toggle="tab" data-bs-target="#ptlf" type="button" role="tab">
+                    <i class="fas fa-file-code"></i> PTLF Parser
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="api-tab" data-bs-toggle="tab" data-bs-target="#api" type="button" role="tab">
+                    <i class="fas fa-code"></i> API Reference
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="flow-tab" data-bs-toggle="tab" data-bs-target="#flow" type="button" role="tab">
+                    <i class="fas fa-chart-line"></i> Data Flow
+                </button>
+            </li>
+        </ul>
+
+        <!-- Tab Content -->
+        <div class="tab-content">
+            <!-- Overview Tab -->
+            <div class="tab-pane fade show active" id="overview" role="tabpanel">
+                <div class="content-section">
+                    <h2 class="section-title"><i class="fas fa-info-circle"></i> System Overview</h2>
+                    
+                    <div class="alert-custom success">
+                        <i class="fas fa-check-circle"></i> <strong>Purpose:</strong> Unified web interface to search, view, and analyze transaction data across three different banking databases.
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-4">
+                            <div class="info-card">
+                                <h5><i class="fas fa-database text-primary"></i> PRM (MSSQL)</h5>
+                                <p>Primary transaction storage with <code>DETAIL</code> table. Uses <code>DD_APDATE</code> for date filtering.</p>
+                                <small>Search: PAN (sd_pan), RRN (SD_REF_NUM)</small>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="info-card">
+                                <h5><i class="fas fa-cloud text-success"></i> UPF (Oracle)</h5>
+                                <p>Payment processing logs in <code>ep_log</code> table. JSON data in <code>ext</code> column.</p>
+                                <small>Search: STAN, RRN (JSON), PAN (masked)</small>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="info-card">
+                                <h5><i class="fas fa-server text-warning"></i> EPS (Oracle)</h5>
+                                <p>PTLF records in <code>SFRTFPOSREG</code> table. Custom parser removes 85-byte header.</p>
+                                <small>Search: PAN, CTX_KEY</small>
+                            </div>
+                        </div>
+                    </div>
+
+                    <h3 class="section-subtitle">Key Features</h3>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <ul>
+                                <li><i class="fas fa-check-circle text-success"></i> Unified search interface</li>
+                                <li><i class="fas fa-check-circle text-success"></i> Real-time database status</li>
+                                <li><i class="fas fa-check-circle text-success"></i> Complete PTLF parser (Java-compatible)</li>
+                                <li><i class="fas fa-check-circle text-success"></i> Date range filtering</li>
+                            </ul>
+                        </div>
+                        <div class="col-md-6">
+                            <ul>
+                                <li><i class="fas fa-check-circle text-success"></i> Vertical card layout (no horizontal scroll)</li>
+                                <li><i class="fas fa-check-circle text-success"></i> Copy to clipboard functionality</li>
+                                <li><i class="fas fa-check-circle text-success"></i> Expand/Collapse all records</li>
+                                <li><i class="fas fa-check-circle text-success"></i> JSON syntax highlighting</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <h3 class="section-subtitle">Technology Stack</h3>
+                    <table class="custom-table">
+                        <thead>
+                            <tr><th>Layer</th><th>Technology</th><th>Version</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td>Backend</td><td>Node.js / Express.js</td><td>16+ / 4.18.2</td></tr>
+                            <tr><td>MSSQL Driver</td><td>mssql</td><td>9.1.1</td></tr>
+                            <tr><td>Oracle Driver</td><td>oracledb</td><td>6.3.0</td></tr>
+                            <tr><td>Frontend</td><td>Bootstrap 5 / Font Awesome</td><td>5.1.3 / 6.0.0</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Architecture Tab -->
+            <div class="tab-pane fade" id="architecture" role="tabpanel">
+                <div class="content-section">
+                    <h2 class="section-title"><i class="fas fa-project-diagram"></i> System Architecture</h2>
+
+                    <div class="flow-diagram">
+                        <h4><i class="fas fa-arrow-down"></i> High-Level Architecture</h4>
+                        <div class="flow-step">
+                            <i class="fas fa-desktop fa-2x"></i><br>
+                            Browser (HTML/CSS/JS)
+                        </div>
+                        <div class="flow-arrow">↓ HTTP/REST API ↓</div>
+                        <div class="flow-step">
+                            <i class="fas fa-server fa-2x"></i><br>
+                            Node.js Express Server
+                        </div>
+                        <div class="flow-arrow">↓ Database Queries ↓</div>
+                        <div>
+                            <div class="flow-step" style="background: var(--prm-color); color: white;">
+                                <i class="fas fa-database"></i> PRM (MSSQL)
+                            </div>
+                            <div class="flow-step" style="background: var(--upf-color); color: white;">
+                                <i class="fas fa-cloud"></i> UPF (Oracle)
+                            </div>
+                            <div class="flow-step" style="background: var(--eps-color); color: white;">
+                                <i class="fas fa-server"></i> EPS (Oracle)
+                            </div>
+                        </div>
+                    </div>
+
+                    <h3 class="section-subtitle">Connection Pooling Strategy</h3>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="code-block">
+                                <span class="json-key">"PRM (MSSQL) Pool"</span>: {<br>
+                                &nbsp;&nbsp;<span class="json-key">"max"</span>: <span class="json-number">10</span>,<br>
+                                &nbsp;&nbsp;<span class="json-key">"min"</span>: <span class="json-number">0</span>,<br>
+                                &nbsp;&nbsp;<span class="json-key">"idleTimeoutMillis"</span>: <span class="json-number">30000</span><br>
+                                }
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="code-block">
+                                <span class="json-key">"UPF/EPS (Oracle) Pool"</span>: {<br>
+                                &nbsp;&nbsp;<span class="json-key">"poolMin"</span>: <span class="json-number">1</span>,<br>
+                                &nbsp;&nbsp;<span class="json-key">"poolMax"</span>: <span class="json-number">10</span>,<br>
+                                &nbsp;&nbsp;<span class="json-key">"poolIncrement"</span>: <span class="json-number">1</span><br>
+                                }
+                            </div>
+                        </div>
+                    </div>
+
+                    <h3 class="section-subtitle">File Structure</h3>
+                    <div class="code-block">
+                        multi-database-search/<br>
+                        ├── server.js                 # Main Express server<br>
+                        ├── ptlf-parser.js           # PTLF parser module<br>
+                        ├── package.json             # Dependencies<br>
+                        ├── .env                     # Environment variables<br>
+                        ├── logs/<br>
+                        │   └── app.log              # Application logs<br>
+                        └── public/<br>
+                            └── index.html           # Frontend interface
+                    </div>
+                </div>
+            </div>
+
+            <!-- Databases Tab -->
+            <div class="tab-pane fade" id="databases" role="tabpanel">
+                <div class="content-section">
+                    <h2 class="section-title"><i class="fas fa-database"></i> Database Configurations</h2>
+
+                    <!-- PRM Database -->
+                    <div class="db-card prm">
+                        <h4><i class="fas fa-database"></i> PRM Database (MSSQL)</h4>
+                        <table class="custom-table">
+                            <tr><th>Parameter</th><th>Value</th></tr>
+                            <tr><td>Server</td><td>10.230.195.68:14889</td></tr>
+                            <tr><td>Database</td><td>PRMNRT</td></tr>
+                            <tr><td>Table</td><td>DETAIL</td></tr>
+                            <tr><td>Username</td><td>test_user</td></tr>
+                        </table>
+                        <h5>Key Columns:</h5>
+                        <ul>
+                            <li><code>sd_pan</code> - Card Number (PAN) - Searchable</li>
+                            <li><code>SD_REF_NUM</code> - Retrieval Reference Number (RRN) - Searchable</li>
+                            <li><code>DD_APDATE</code> - Transaction Date - Date filtering</li>
+                        </ul>
+                        <div class="code-block">
+                            -- Sample Query<br>
+                            SELECT * FROM [PRMNRT].[dbo].[DETAIL]<br>
+                            WHERE sd_pan = '5107531000168133'<br>
+                            ORDER BY DD_APDATE DESC
+                        </div>
+                    </div>
+
+                    <!-- UPF Database -->
+                    <div class="db-card upf">
+                        <h4><i class="fas fa-cloud"></i> UPF Database (Oracle)</h4>
+                        <table class="custom-table">
+                            <tr><th>Parameter</th><th>Value</th></tr>
+                            <tr><td>Connect String</td><td>10.230.195.68:1521/UPFDB</td></tr>
+                            <tr><td>Username</td><td>upfdev4</td></tr>
+                            <tr><td>Table</td><td>ep_log</td></tr>
+                            <tr><td>Filter</td><td>msg_tp = 'AccptrCmpltnAdvc'</td></tr>
+                        </table>
+                        <h5>JSON Paths Used:</h5>
+                        <ul>
+                            <li><code>$.AccptrCmpltnAdvc.CmpltnAdvc.Cntxt.SaleCntxt.SaleRefNb</code> → RRN</li>
+                            <li><code>$.AccptrCmpltnAdvc.CmpltnAdvc.Envt.Card.PlainCardData.PAN</code> → PAN (masked)</li>
+                            <li><code>$.AccptrCmpltnAdvc.CmpltnAdvc.Cntxt.SaleCntxt.Amt</code> → Amount</li>
+                        </ul>
+                        <div class="code-block">
+                            -- Sample Query<br>
+                            SELECT * FROM ep_log <br>
+                            WHERE msg_tp = 'AccptrCmpltnAdvc'<br>
+                            AND stan = '000105'<br>
+                            AND JSON_VALUE(ext, '$.AccptrCmpltnAdvc.CmpltnAdvc.Cntxt.SaleCntxt.SaleRefNb') = '131006000105'
+                        </div>
+                    </div>
+
+                    <!-- EPS Database -->
+                    <div class="db-card eps">
+                        <h4><i class="fas fa-server"></i> EPS Database (Oracle) - PTLF</h4>
+                        <table class="custom-table">
+                            <tr><th>Parameter</th><th>Value</th></tr>
+                            <tr><td>Connect String</td><td>10.230.195.68:1521/EPSDB</td></tr>
+                            <tr><td>Table</td><td>SFRTFPOSREG</td></tr>
+                            <tr><td>Key Columns</td><td>PAN, CTX_KEY, SAF_MSG</td></tr>
+                            <tr><td>Header Length</td><td>85 bytes (removed before parsing)</td></tr>
+                        </table>
+                        <div class="alert-custom">
+                            <i class="fas fa-info-circle"></i> <strong>Important:</strong> The first 85 bytes of SAF_MSG are removed before parsing (matches Java's safBeginIndex = 85)
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- PTLF Parser Tab -->
+            <div class="tab-pane fade" id="ptlf" role="tabpanel">
+                <div class="content-section">
+                    <h2 class="section-title"><i class="fas fa-file-code"></i> PTLF Parser Documentation</h2>
+
+                    <div class="alert-custom">
+                        <i class="fas fa-info-circle"></i> <strong>What is PTLF?</strong><br>
+                        PTLF (Payment Transaction Logging Format) is a proprietary message format developed by Westpac for recording financial transaction data in their EPS database.
+                    </div>
+
+                    <h3 class="section-subtitle">Message Structure</h3>
+                    <div class="token-structure">
+                        <span class="token-part token-marker">! </span><span class="token-part token-id">B0</span><span class="token-part token-length">00123</span><span class="token-part token-value">[123 bytes of B0 data]</span>
+                        <span class="token-part token-marker">! </span><span class="token-part token-id">QP</span><span class="token-part token-length">00344</span><span class="token-part token-value">[344 bytes of QP data]</span>
+                        <span class="token-part token-marker">! </span><span class="token-part token-id">QS</span><span class="token-part token-length">00059</span><span class="token-part token-value">[59 bytes of QS data]</span>
+                    </div>
+
+                    <h3 class="section-subtitle">Token Format Specification</h3>
+                    <table class="custom-table">
+                        <thead><tr><th>Component</th><th>Length</th><th>Description</th><th>Example</th></tr></thead>
+                        <tbody>
+                            <tr><td>Start Marker</td><td>2 chars</td><td>Always <code>! </code></td><td><code>! </code></td></tr>
+                            <tr><td>Token ID</td><td>2 chars</td><td>Identifies token type</td><td><code>B0</code>, <code>QP</code>, <code>QS</code></td></tr>
+                            <tr><td>Length Field</td><td>5 chars</td><td>Length of value (zero-padded)</td><td><code>00123</code></td></tr>
+                            <tr><td>Value Field</td><td>Variable</td><td>Actual token data</td><td><code>BNET010143025...</code></td></tr>
+                        </tbody>
+                    </table>
+
+                    <h3 class="section-subtitle">Token Types Summary</h3>
+                    <table class="custom-table">
+                        <thead><tr><th>Token</th><th>Purpose</th><th>Key Fields</th><th>Length</th></tr></thead>
+                        <tbody>
+                            <tr><td><strong>B0</strong></td><td>Base Transaction</td><td>Card Number, Response Code, Date/Time</td><td>~180 bytes</td></tr>
+                            <tr><td><strong>QP</strong></td><td>ISO8583 Payment</td><td>Amount, Merchant Name, Approval Code</td><td>~344 bytes</td></tr>
+                            <tr><td><strong>QS</strong></td><td>Timing Data</td><td>Entry/Exit Timestamps, Processing Times</td><td>~59 bytes</td></tr>
+                            <tr><td><strong>QC</strong></td><td>Variable Fields</td><td>Dynamic data fields</td><td>Variable</td></tr>
+                            <tr><td><strong>BE</strong></td><td>Currency Conversion</td><td>Currency Code, Conversion Rate</td><td>~62 bytes</td></tr>
+                            <tr><td><strong>SN</strong></td><td>Sub-tokens</td><td>Nested token data</td><td>Variable</td></tr>
+                        </tbody>
+                    </table>
+
+                    <h3 class="section-subtitle">B0 Token (Base Transaction) - Critical Fields</h3>
+                    <table class="custom-table">
+                        <thead><tr><th>Field</th><th>Offset</th><th>Description</th><th>Values</th></tr></thead>
+                        <tbody>
+                            <tr><td>RESPCDE</td><td>26-28</td><td>Response Code</td><td>00=Approved, 01=Declined, 05=Do Not Honor</td></tr>
+                            <tr><td>CARD_NUMBER</td><td>164-180</td><td>PAN</td><td>16-digit card number (masked)</td></tr>
+                            <tr><td>PROCCDE</td><td>32-38</td><td>Processing Code</td><td>000000=Purchase, 200000=Refund</td></tr>
+                            <tr><td>LOCALTIM</td><td>10-16</td><td>Transaction Time</td><td>HHMMSS format</td></tr>
+                            <tr><td>LOCALDAT</td><td>16-20</td><td>Transaction Date</td><td>DDMMYY format</td></tr>
+                        </tbody>
+                    </table>
+
+                    <h3 class="section-subtitle">QP Token (ISO8583 Fields) - Key Fields</h3>
+                    <table class="custom-table">
+                        <thead><tr><th>Field</th><th>Description</th><th>Example</th></tr></thead>
+                        <tbody>
+                            <tr><td>DE015</td><td>Settlement Amount</td><td>000000001000 ($10.00)</td></tr>
+                            <tr><td>DE018</td><td>Merchant Category Code (MCC)</td><td>5411 (Grocery)</td></tr>
+                            <tr><td>DE043</td><td>Merchant Name</td><td>WESTPAC BANK AUCKLAND</td></tr>
+                            <tr><td>DE057</td><td>Approval Code</td><td>123456</td></tr>
+                            <tr><td>DE122</td><td>Terminal ID</td><td>TERM0012345</td></tr>
+                        </tbody>
+                    </table>
+
+                    <h3 class="section-subtitle">Parser Functions (JavaScript)</h3>
+                    <table class="custom-table">
+                        <thead><tr><th>Function</th><th>Java Equivalent</th><th>Purpose</th></tr></thead>
+                        <tbody>
+                            <tr><td><code>parseWithTokensToMap()</code></td><td><code>ptlfxParser.parseWithTokensToMap()</code></td><td>Main entry point</td></tr>
+                            <tr><td><code>parseTokenData()</code></td><td><code>parseTokenData()</code></td><td>Parse token section</td></tr>
+                            <tr><td><code>parseB0TokenTags()</code></td><td><code>parseB0TokenTags()</code></td><td>Parse B0 token</td></tr>
+                            <tr><td><code>parseQPTokenTags()</code></td><td><code>parseQPTokenTags()</code></td><td>Parse QP token</td></tr>
+                            <tr><td><code>parseQSTokenTags()</code></td><td><code>parseQSTokenTags()</code></td><td>Parse QS token</td></tr>
+                            <tr><td><code>parseQCTokenTags()</code></td><td><code>parseQCTokenTags()</code></td><td>Parse QC token</td></tr>
+                            <tr><td><code>parseBeTokenTags()</code></td><td><code>parseBeTokenTags()</code></td><td>Parse BE token</td></tr>
+                        </tbody>
+                    </table>
+
+                    <h3 class="section-subtitle">Complete PTLF Example</h3>
+                    <div class="code-block json">
+                        {<br>
+                        &nbsp;&nbsp;<span class="json-key">"stan"</span>: <span class="json-string">"000105"</span>,<br>
+                        &nbsp;&nbsp;<span class="json-key">"rrn"</span>: <span class="json-string">"131006000105"</span>,<br>
+                        &nbsp;&nbsp;<span class="json-key">"B0_RESPCDE"</span>: <span class="json-string">"00"</span>,<br>
+                        &nbsp;&nbsp;<span class="json-key">"B0_CARD_NUMBER"</span>: <span class="json-string">"510753******8133"</span>,<br>
+                        &nbsp;&nbsp;<span class="json-key">"QP_DE015"</span>: <span class="json-string">"000000001000"</span>,<br>
+                        &nbsp;&nbsp;<span class="json-key">"QP_DE043"</span>: <span class="json-string">"WESTPAC BANK AUCKLAND"</span>,<br>
+                        &nbsp;&nbsp;<span class="json-key">"QS_entry_ts"</span>: <span class="json-string">"20260528143025000"</span>,<br>
+                        &nbsp;&nbsp;<span class="json-key">"BE_CRNCYCDE"</span>: <span class="json-string">"554"</span><br>
+                        }
+                    </div>
+                </div>
+            </div>
+
+            <!-- API Reference Tab -->
+            <div class="tab-pane fade" id="api" role="tabpanel">
+                <div class="content-section">
+                    <h2 class="section-title"><i class="fas fa-code"></i> API Reference</h2>
+
+                    <h3 class="section-subtitle">PRM Search</h3>
+                    <div class="code-block">
+                        POST /api/prm/query<br>
+                        Content-Type: application/json<br><br>
+                        {<br>
+                        &nbsp;&nbsp;"pan": "5107531000168133",<br>
+                        &nbsp;&nbsp;"rrn": "000000069147",<br>
+                        &nbsp;&nbsp;"dateFrom": "2026-05-28T00:00:00.000Z",<br>
+                        &nbsp;&nbsp;"dateTo": "2026-06-01T23:59:59.999Z"<br>
+                        }
+                    </div>
+
+                    <h3 class="section-subtitle">UPF Search</h3>
+                    <div class="code-block">
+                        POST /api/upf/query<br>
+                        Content-Type: application/json<br><br>
+                        {<br>
+                        &nbsp;&nbsp;"stan": "000105",<br>
+                        &nbsp;&nbsp;"rrn": "131006000105",<br>
+                        &nbsp;&nbsp;"pan": "5107531000168133",<br>
+                        &nbsp;&nbsp;"dateFrom": "2026-05-27T00:00:00.000Z",<br>
+                        &nbsp;&nbsp;"dateTo": "2026-06-01T23:59:59.999Z"<br>
+                        }
+                    </div>
+
+                    <h3 class="section-subtitle">EPS Search (PTLF)</h3>
+                    <div class="code-block">
+                        POST /api/eps/query<br>
+                        Content-Type: application/json<br><br>
+                        {<br>
+                        &nbsp;&nbsp;"pan": "5107531000168133",<br>
+                        &nbsp;&nbsp;"ctxKey": "5107531000168133131006000105"<br>
+                        }
+                    </div>
+
+                    <h3 class="section-subtitle">Health Check</h3>
+                    <div class="code-block">
+                        GET /api/health<br><br>
+                        Response:<br>
+                        {<br>
+                        &nbsp;&nbsp;"prm": true,<br>
+                        &nbsp;&nbsp;"upf": true,<br>
+                        &nbsp;&nbsp;"eps": true,<br>
+                        &nbsp;&nbsp;"timestamp": "2026-06-02T10:30:00.000Z"<br>
+                        }
+                    </div>
+
+                    <h3 class="section-subtitle">Debug Endpoints</h3>
+                    <table class="custom-table">
+                        <thead><tr><th>Endpoint</th><th>Method</th><th>Description</th></tr></thead>
+                        <tbody>
+                            <tr><td>/api/prm/columns</td><td>GET</td><td>Show PRM DETAIL table columns</td></tr>
+                            <tr><td>/api/eps/tables</td><td>GET</td><td>Show EPS tables and columns</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Data Flow Tab -->
+            <div class="tab-pane fade" id="flow" role="tabpanel">
+                <div class="content-section">
+                    <h2 class="section-title"><i class="fas fa-chart-line"></i> Data Flow & Processing</h2>
+
+                    <h3 class="section-subtitle">Complete Data Flow Diagram</h3>
+                    <div class="flow-diagram">
+                        <div class="flow-step">
+                            <i class="fas fa-user fa-2x"></i><br>
+                            1. User Input<br>
+                            PAN / RRN / STAN
+                        </div>
+                        <div class="flow-arrow">↓</div>
+                        <div class="flow-step">
+                            <i class="fas fa-window-maximize fa-2x"></i><br>
+                            2. Frontend Form<br>
+                            Validation & Submit
+                        </div>
+                        <div class="flow-arrow">↓</div>
+                        <div class="flow-step">
+                            <i class="fas fa-paper-plane fa-2x"></i><br>
+                            3. HTTP Request<br>
+                            POST to API
+                        </div>
+                        <div class="flow-arrow">↓</div>
+                        <div class="flow-step">
+                            <i class="fas fa-server fa-2x"></i><br>
+                            4. Express Server<br>
+                            Route Handler
+                        </div>
+                    </div>
+
+                    <h3 class="section-subtitle">PTLF Parsing Flow</h3>
+                    <div class="flow-diagram">
+                        <div class="flow-step">
+                            <i class="fas fa-inbox fa-2x"></i><br>
+                            Raw SAF_MSG<br>
+                            (PTLF Message)
+                        </div>
+                        <div class="flow-arrow">→</div>
+                        <div class="flow-step">
+                            <i class="fas fa-cut fa-2x"></i><br>
+                            Remove 85-byte<br>
+                            Header
+                        </div>
+                        <div class="flow-arrow">→</div>
+                        <div class="flow-step">
+                            <i class="fas fa-code fa-2x"></i><br>
+                            Parse Fixed<br>
+                            Fields (STAN, RRN)
+                        </div>
+                        <div class="flow-arrow">→</div>
+                        <div class="flow-step">
+                            <i class="fas fa-token fa-2x"></i><br>
+                            Parse Tokens<br>
+                            (! B0, ! QP, etc)
+                        </div>
+                        <div class="flow-arrow">→</div>
+                        <div class="flow-step">
+                            <i class="fas fa-chart-simple fa-2x"></i><br>
+                            Extract Fields<br>
+                            (Card, Amount, etc)
+                        </div>
+                        <div class="flow-arrow">→</div>
+                        <div class="flow-step">
+                            <i class="fas fa-file-export fa-2x"></i><br>
+                            JSON Output<br>
+                            Flat Map
+                        </div>
+                    </div>
+
+                    <h3 class="section-subtitle">Search Logic by Database</h3>
+                    <table class="custom-table">
+                        <thead>
+                            <tr><th>Database</th><th>PAN</th><th>RRN</th><th>STAN</th><th>Date Range</th><th>CTX Key</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td><strong>PRM</strong></td><td>✅ sd_pan</td><td>✅ SD_REF_NUM</td><td>❌</td><td>✅ DD_APDATE</td><td>❌</td></tr>
+                            <tr><td><strong>UPF</strong></td><td>✅ (masked)</td><td>✅ (JSON)</td><td>✅ stan</td><td>✅ LAST_MODIFIED</td><td>❌</td></tr>
+                            <tr><td><strong>EPS</strong></td><td>✅ PAN</td><td>❌</td><td>❌</td><td>❌</td><td>✅ CTX_KEY</td></tr>
+                        </tbody>
+                    </table>
+
+                    <h3 class="section-subtitle">PTLF Parser Function Call Hierarchy</h3>
+                    <div class="code-block">
+                        parseWithTokensToMap(recordData, fixedLengthBeforeTokens = 85)<br>
+                        │<br>
+                        ├── parseFixedFields(fixedPart)<br>
+                        │   └── Extract STAN, RRN, Amount<br>
+                        │<br>
+                        └── parseTokenData(tokenSection)<br>
+                            │<br>
+                            └── getTokens(tokensStr, tokensMap)<br>
+                                │<br>
+                                ├── parseB0TokenTags(token_B0)<br>
+                                ├── parseQPTokenTags(token_QP)<br>
+                                ├── parseQSTokenTags(token_QS)<br>
+                                ├── parseQCTokenTags(token_QC)<br>
+                                ├── parseBeTokenTags(token_BE)<br>
+                                └── parseSnTokenTags(token_SN)
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="footer">
+            <p><i class="fas fa-code"></i> PTLF Parser & Multi-Database Search System | Version 1.0 | June 2026</p>
+            <p>Java-compatible PTLF parser | 85-byte header removal | Full token parsing support</p>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
