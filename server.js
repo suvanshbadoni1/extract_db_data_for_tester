@@ -6,6 +6,9 @@ const oracledb = require('oracledb');
 const path = require('path');
 const fs = require('fs');
 
+// Import the PTLF parser
+const { parseWithTokensToMap, maskPAN } = require('./ptlf-parser');
+
 const app = express();
 const port = process.env.PORT || 3000;
 
@@ -62,7 +65,7 @@ const oracle1Config = {
     connectTimeout: 30
 };
 
-// EPS Database (Oracle 2)
+// EPS Database (Oracle 2) - Contains PTLF data in SFRTFPOSREG table
 const oracle2Config = {
     user: process.env.ORACLE2_USER || 'eps_user',
     password: process.env.ORACLE2_PASSWORD || '',
@@ -104,10 +107,6 @@ async function initializeDatabases() {
         connectionStatus.prmError = null;
         logToFile('✅ PRM (MSSQL) Database - Connected successfully');
         
-        const testResult = await mssqlPool.request().query('SELECT @@VERSION as version, GETDATE() as currentTime, DB_NAME() as dbName');
-        logToFile(`   PRM Version: ${testResult.recordset[0].version.substring(0, 60)}...`);
-        logToFile(`   Current Database: ${testResult.recordset[0].dbName}`);
-        
     } catch (err) {
         connectionStatus.prm = false;
         connectionStatus.prmError = err.message;
@@ -135,15 +134,6 @@ async function initializeDatabases() {
         logToFile('✅ UPF (Oracle 1) Database - Connected successfully');
         logToFile(`   Connected as: ${result.rows[0][0]}`);
         
-        let checkConn = await oracle1Pool.getConnection();
-        try {
-            const tableCheck = await checkConn.execute(`SELECT COUNT(*) FROM ep_log WHERE ROWNUM = 1`);
-            logToFile(`   ✅ ep_log table is accessible`);
-        } catch (tableErr) {
-            logToFile(`   ⚠️  ep_log table check: ${tableErr.message}`);
-        }
-        await checkConn.close();
-        
     } catch (err) {
         connectionStatus.upf = false;
         connectionStatus.upfError = err.message;
@@ -151,7 +141,7 @@ async function initializeDatabases() {
         oracle1Pool = null;
     }
     
-    // Initialize EPS (Oracle 2)
+    // Initialize EPS (Oracle 2) - Using SFRTFPOSREG table
     try {
         logToFile(`\nConnecting to EPS Database (Oracle):`);
         logToFile(`   Connect String: ${oracle2Config.connectString}`);
@@ -166,6 +156,23 @@ async function initializeDatabases() {
         connectionStatus.eps = true;
         connectionStatus.epsError = null;
         logToFile('✅ EPS PTLF (Oracle 2) Database - Connected successfully');
+        
+        // Check if SFRTFPOSREG table exists
+        let checkConn = await oracle2Pool.getConnection();
+        try {
+            const tableCheck = await checkConn.execute(`SELECT COUNT(*) FROM SFRTFPOSREG WHERE ROWNUM = 1`);
+            logToFile(`   ✅ SFRTFPOSREG table is accessible`);
+        } catch (tableErr) {
+            logToFile(`   ⚠️ SFRTFPOSREG table check: ${tableErr.message}`);
+            logToFile(`   Trying alternative table: EPS_PTLF_RECORDS`);
+            try {
+                const altCheck = await checkConn.execute(`SELECT COUNT(*) FROM EPS_PTLF_RECORDS WHERE ROWNUM = 1`);
+                logToFile(`   ✅ EPS_PTLF_RECORDS table is accessible`);
+            } catch (altErr) {
+                logToFile(`   ⚠️ No known EPS table found`);
+            }
+        }
+        await checkConn.close();
         
     } catch (err) {
         connectionStatus.eps = false;
@@ -182,26 +189,7 @@ async function initializeDatabases() {
     logToFile('');
 }
 
-// Mask PAN (show first 6 and last 4)
-function maskPAN(pan) {
-    if (!pan || pan.length < 10) return pan;
-    const panStr = pan.toString();
-    if (panStr.length <= 10) return panStr;
-    return `${panStr.substring(0, 6)}******${panStr.substring(panStr.length - 4)}`;
-}
-
-// Format JSON data
-function formatJSONData(jsonString) {
-    if (!jsonString) return null;
-    try {
-        if (typeof jsonString === 'object') return jsonString;
-        return JSON.parse(jsonString);
-    } catch (e) {
-        return { raw_value: jsonString, parse_error: e.message };
-    }
-}
-
-// PRM Query endpoint - with DATE RANGE support using DD_APDATE
+// PRM Query endpoint
 app.post('/api/prm/query', async (req, res) => {
     const { pan, rrn, dateFrom, dateTo } = req.body;
     
@@ -231,7 +219,6 @@ app.post('/api/prm/query', async (req, res) => {
             request.input('rrn', sql.VarChar, rrn);
         }
         
-        // Date range using DD_APDATE column
         if (dateFrom && dateFrom.trim()) {
             query += ` AND DD_APDATE >= @dateFrom`;
             request.input('dateFrom', sql.DateTime, new Date(dateFrom));
@@ -244,29 +231,17 @@ app.post('/api/prm/query', async (req, res) => {
         
         query += ` ORDER BY DD_APDATE DESC`;
         
-        logToFile(`PRM Query - PAN: ${pan || 'NOT PROVIDED'}, RRN: ${rrn || 'NOT PROVIDED'}, DateFrom: ${dateFrom || 'Any'}, DateTo: ${dateTo || 'Any'}`);
+        logToFile(`PRM Query - PAN: ${pan || 'NOT PROVIDED'}, RRN: ${rrn || 'NOT PROVIDED'}`);
         
         const result = await request.query(query);
         
         logToFile(`PRM Query completed - Found ${result.recordset.length} records`);
         
-        const formattedData = result.recordset.map(record => {
-            const formatted = {};
-            for (const [key, value] of Object.entries(record)) {
-                if (typeof value === 'string' && (value.startsWith('{') || value.startsWith('['))) {
-                    formatted[key] = formatJSONData(value);
-                } else {
-                    formatted[key] = value;
-                }
-            }
-            return formatted;
-        });
-        
         res.json({
             success: true,
             database: 'PRM (MSSQL)',
-            data: formattedData,
-            count: formattedData.length,
+            data: result.recordset,
+            count: result.recordset.length,
             connectionError: false,
             isConnected: true
         });
@@ -284,7 +259,7 @@ app.post('/api/prm/query', async (req, res) => {
     }
 });
 
-// UPF Query endpoint - with DATE RANGE support using LAST_MODIFIED
+// UPF Query endpoint
 app.post('/api/upf/query', async (req, res) => {
     const { pan, rrn, stan, dateFrom, dateTo } = req.body;
     let connection;
@@ -324,10 +299,8 @@ app.post('/api/upf/query', async (req, res) => {
             }
             query += ` AND JSON_VALUE(ext, '$.AccptrCmpltnAdvc.CmpltnAdvc.Envt.Card.PlainCardData.PAN') LIKE :panPattern`;
             params.panPattern = `%${maskedPan}%`;
-            logToFile(`Searching for masked PAN: ${maskedPan}`);
         }
         
-        // Date range using LAST_MODIFIED column
         if (dateFrom && dateFrom.trim()) {
             query += ` AND LAST_MODIFIED >= TO_TIMESTAMP(:dateFrom, 'YYYY-MM-DD"T"HH24:MI:SS.FF3"Z"')`;
             params.dateFrom = dateFrom;
@@ -340,80 +313,51 @@ app.post('/api/upf/query', async (req, res) => {
         
         query += ` ORDER BY LAST_MODIFIED DESC FETCH FIRST 100 ROWS ONLY`;
         
-        logToFile(`UPF Query - STAN: ${stan || 'NOT PROVIDED'}, RRN: ${rrn || 'NOT PROVIDED'}, PAN: ${pan || 'NOT PROVIDED'}, DateFrom: ${dateFrom || 'Any'}, DateTo: ${dateTo || 'Any'}`);
+        logToFile(`UPF Query - STAN: ${stan || 'NOT PROVIDED'}, RRN: ${rrn || 'NOT PROVIDED'}, PAN: ${pan || 'NOT PROVIDED'}`);
         
         const result = await connection.execute(query, params);
         
-        logToFile(`UPF Query completed - Found ${result.rows.length} records`);
-        
         const formattedData = [];
-        
         for (const row of result.rows) {
             const record = {};
-            
             if (result.metaData) {
                 result.metaData.forEach((col, index) => {
                     let value = row[index];
-                    
-                    if (col.name === 'EXT' || col.name === 'ext') {
-                        if (value) {
-                            try {
-                                const parsed = typeof value === 'string' ? JSON.parse(value) : value;
-                                record[col.name] = parsed;
-                                record.parsed_json = parsed;
-                                
-                                const saleRefNb = parsed?.AccptrCmpltnAdvc?.CmpltnAdvc?.Cntxt?.SaleCntxt?.SaleRefNb;
-                                const panFromJson = parsed?.AccptrCmpltnAdvc?.CmpltnAdvc?.Envt?.Card?.PlainCardData?.PAN;
-                                const amount = parsed?.AccptrCmpltnAdvc?.CmpltnAdvc?.Cntxt?.SaleCntxt?.Amt;
-                                const currency = parsed?.AccptrCmpltnAdvc?.CmpltnAdvc?.Cntxt?.SaleCntxt?.Ccy;
-                                const responseCode = parsed?.AccptrCmpltnAdvc?.CmpltnAdvc?.Rspn?.RspnCd;
-                                
-                                if (saleRefNb) record.extracted_rrn = saleRefNb;
-                                if (panFromJson) record.extracted_pan = panFromJson;
-                                if (amount) record.extracted_amount = amount;
-                                if (currency) record.extracted_currency = currency;
-                                if (responseCode) record.extracted_response_code = responseCode;
-                            } catch (e) {
-                                record[col.name] = value;
+                    if (col.name === 'EXT' && value) {
+                        try {
+                            const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+                            record.json_data = parsed;
+                            const saleCtx = parsed?.AccptrCmpltnAdvc?.CmpltnAdvc?.Cntxt?.SaleCntxt;
+                            if (saleCtx) {
+                                if (saleCtx.SaleRefNb) record.rrn = saleCtx.SaleRefNb;
+                                if (saleCtx.Amt) record.amount = saleCtx.Amt;
                             }
+                            const envCard = parsed?.AccptrCmpltnAdvc?.CmpltnAdvc?.Envt?.Card?.PlainCardData;
+                            if (envCard?.PAN) record.pan = maskPAN(envCard.PAN);
+                        } catch (e) {
+                            record.ext = value;
                         }
                     } else {
-                        if ((col.name === 'PAN' || col.name === 'pan') && value) {
-                            record[col.name] = value;
-                        } else if (col.name === 'LAST_MODIFIED' || col.name === 'last_modified') {
-                            record.last_modified = value;
-                        } else {
-                            record[col.name] = value;
-                        }
+                        record[col.name.toLowerCase()] = value;
                     }
                 });
             }
-            
             formattedData.push(record);
         }
         
         res.json({
             success: true,
-            database: 'UPF (Oracle 1)',
+            database: 'UPF (Oracle)',
             data: formattedData,
             count: formattedData.length,
-            search_criteria: {
-                stan_provided: !!(stan && stan.trim()),
-                rrn_provided: !!(rrn && rrn.trim()),
-                pan_provided: !!(pan && pan.trim()),
-                date_from: dateFrom || null,
-                date_to: dateTo || null
-            },
-            note: "PAN is masked in UPF database (first 6 and last 4 only). Searching using masked format.",
             connectionError: false,
             isConnected: true
         });
-        
     } catch (err) {
         logToFile('UPF Query Error: ' + err.message);
         res.json({
             success: false,
-            database: 'UPF (Oracle 1)',
+            database: 'UPF (Oracle)',
             error: err.message,
             data: [],
             count: 0,
@@ -425,15 +369,15 @@ app.post('/api/upf/query', async (req, res) => {
     }
 });
 
-// EPS Query endpoint (Oracle 2)
+// EPS Query endpoint - Using PTLF Parser like the Java EpsJournalService
 app.post('/api/eps/query', async (req, res) => {
-    const { pan, rrn, stan } = req.body;
+    const { pan, rrn, stan, ctxKey, dateFrom, dateTo } = req.body;
     let connection;
     
     if (!oracle2Pool || !connectionStatus.eps) {
         return res.json({
             success: false,
-            database: 'EPS PTLF (Oracle 2)',
+            database: 'EPS PTLF (Oracle)',
             error: connectionStatus.epsError || 'EPS Database is not connected',
             data: [],
             count: 0,
@@ -445,54 +389,95 @@ app.post('/api/eps/query', async (req, res) => {
     try {
         connection = await oracle2Pool.getConnection();
         
-        let query = `SELECT * FROM EPS_PTLF_RECORDS WHERE 1=1`;
+        // Build query for SFRTFPOSREG table (as used in EpsJournalService)
+        let query = `SELECT PAN, CTX_KEY, SAF_MSG FROM SFRTFPOSREG WHERE 1=1`;
         const params = {};
+        
+        if (ctxKey && ctxKey.trim()) {
+            query += ` AND CTX_KEY = :ctxKey`;
+            params.ctxKey = ctxKey;
+        }
         
         if (pan && pan.trim()) {
             query += ` AND PAN = :pan`;
             params.pan = pan;
         }
         
-        if (rrn && rrn.trim()) {
-            query += ` AND RRN = :rrn`;
-            params.rrn = rrn;
-        }
-        
-        if (stan && stan.trim()) {
-            query += ` AND STAN = :stan`;
-            params.stan = stan;
-        }
-        
+        // If no specific key, try alternative table or limit results
         if (Object.keys(params).length === 0) {
-            query = `SELECT * FROM EPS_PTLF_RECORDS WHERE ROWNUM <= 10`;
+            // Try alternative table or just get recent records
+            try {
+                const altCheck = await connection.execute(`SELECT COUNT(*) FROM SFRTFPOSREG WHERE ROWNUM = 1`);
+                query = `SELECT PAN, CTX_KEY, SAF_MSG FROM SFRTFPOSREG WHERE ROWNUM <= 20`;
+            } catch (err) {
+                // Try alternative table name
+                query = `SELECT PAN, CTX_KEY, SAF_MSG FROM EPS_PTLF_RECORDS WHERE ROWNUM <= 20`;
+            }
         }
         
-        logToFile(`EPS Query - PAN: ${pan}, RRN: ${rrn}, STAN: ${stan}`);
+        logToFile(`EPS Query - CTX_KEY: ${ctxKey || 'NOT PROVIDED'}, PAN: ${pan || 'NOT PROVIDED'}`);
         
         const result = await connection.execute(query, params);
         
-        const formattedData = result.rows.map(row => {
-            const obj = {};
-            if (result.metaData) {
-                result.metaData.forEach((col, index) => {
-                    let value = row[index];
-                    if (value && typeof value === 'object' && value.toISOString) {
-                        value = value.toISOString();
-                    }
-                    if ((col.name.toUpperCase() === 'PAN' || col.name === 'pan') && value) {
-                        value = maskPAN(value);
-                    }
-                    obj[col.name.toLowerCase()] = value;
-                });
+        // Process each record with PTLF parser - similar to Java's parseWithTokensToMap
+        const formattedData = [];
+        const safBeginIndex = 85; // They remove 85 characters of header before parsing
+        
+        for (const row of result.rows) {
+            const record = {
+                pan: row[0],
+                ctx_key: row[1],
+                saf_msg_length: row[2] ? row[2].length : 0
+            };
+            
+            // Parse the SAF_MSG if it exists (similar to their safMessage.substring(safBeginIndex))
+            if (row[2] && row[2].length > safBeginIndex) {
+                const safMessage = typeof row[2] === 'string' ? row[2] : String(row[2]);
+                const ptlfData = safMessage.substring(safBeginIndex); // Remove 85-character header
+                
+                logToFile(`Parsing PTLF data, length: ${ptlfData.length}`);
+                
+                // Use the same parser as the Java ptlfxParser.parseWithTokensToMap()
+                const parsedData = parseWithTokensToMap(ptlfData);
+                
+                record.ptlf_parsed = parsedData;
+                
+                // Extract key fields for display
+                if (parsedData.stan) record.stan = parsedData.stan;
+                if (parsedData.rrn) record.rrn = parsedData.rrn;
+                if (parsedData.masked_pan) record.masked_pan = parsedData.masked_pan;
+                if (parsedData.pan) record.extracted_pan = parsedData.pan;
+                if (parsedData.settlement_amount) record.settlement_amount = parsedData.settlement_amount;
+                if (parsedData.converted_amount) record.converted_amount = parsedData.converted_amount;
+                
+                // Extract QP fields
+                if (parsedData.QP_DE015) record.qp_amount = parsedData.QP_DE015;
+                if (parsedData.QP_DE043) record.merchant_name = parsedData.QP_DE043;
+                if (parsedData.QP_DE057) record.approval_code = parsedData.QP_DE057;
+                if (parsedData.QP_DE122) record.terminal_id = parsedData.QP_DE122;
+                
+                // Extract BE fields
+                if (parsedData.BE_CRNCYCDE) record.currency = parsedData.BE_CRNCYCDE;
+                
+                // Extract B0 fields
+                if (parsedData.B0_RESPCDE) record.response_code = parsedData.B0_RESPCDE;
+            } else {
+                record.raw_saf_msg = row[2];
+                record.parse_note = `SAF_MSG length ${row[2] ? row[2].length : 0} is less than header length ${safBeginIndex}`;
             }
-            return obj;
-        });
+            
+            formattedData.push(record);
+        }
+        
+        logToFile(`EPS Query completed - Found ${formattedData.length} records, parsed with PTLF parser`);
         
         res.json({
             success: true,
-            database: 'EPS PTLF (Oracle 2)',
+            database: 'EPS PTLF (Oracle) - SFRTFPOSREG',
             data: formattedData,
             count: formattedData.length,
+            parser_note: "PTLF parser applied - removed 85-byte header before parsing (same as Java EpsJournalService)",
+            saf_begin_index: 85,
             connectionError: false,
             isConnected: true
         });
@@ -501,7 +486,7 @@ app.post('/api/eps/query', async (req, res) => {
         logToFile('EPS Query Error: ' + err.message);
         res.json({
             success: false,
-            database: 'EPS PTLF (Oracle 2)',
+            database: 'EPS PTLF (Oracle)',
             error: err.message,
             data: [],
             count: 0,
@@ -562,36 +547,39 @@ app.get('/api/health', async (req, res) => {
     });
 });
 
-// Debug endpoints
-app.get('/api/upf/debug-columns', async (req, res) => {
+// Debug endpoint to show EPS table structure
+app.get('/api/eps/tables', async (req, res) => {
     let connection;
     try {
-        if (!oracle1Pool || !connectionStatus.upf) {
-            return res.json({ error: 'UPF Database not connected' });
+        if (!oracle2Pool || !connectionStatus.eps) {
+            return res.json({ error: 'EPS Database not connected' });
         }
         
-        connection = await oracle1Pool.getConnection();
+        connection = await oracle2Pool.getConnection();
         
+        // Check for SFRTFPOSREG table
         const result = await connection.execute(`
-            SELECT COLUMN_NAME, DATA_TYPE 
-            FROM ALL_TAB_COLUMNS 
-            WHERE TABLE_NAME = 'EP_LOG' 
-            AND OWNER = USER
-            ORDER BY COLUMN_ID
+            SELECT table_name FROM user_tables WHERE table_name IN ('SFRTFPOSREG', 'EPS_PTLF_RECORDS')
         `);
         
-        const columns = result.rows.map(row => ({
-            name: row[0],
-            type: row[1]
-        }));
+        const tables = result.rows.map(row => row[0]);
         
-        const sample = await connection.execute(`SELECT * FROM ep_log WHERE ROWNUM = 1`);
+        let tableInfo = {};
+        for (const table of tables) {
+            const columns = await connection.execute(`
+                SELECT COLUMN_NAME, DATA_TYPE 
+                FROM ALL_TAB_COLUMNS 
+                WHERE TABLE_NAME = '${table}' 
+                AND OWNER = USER
+            `);
+            tableInfo[table] = columns.rows.map(col => ({ name: col[0], type: col[1] }));
+        }
         
         res.json({
             success: true,
-            columns: columns,
-            sample_columns_metadata: sample.metaData,
-            sample_data: sample.rows[0] || null
+            tables_found: tables,
+            table_columns: tableInfo,
+            note: "EpsJournalService uses SFRTFPOSREG table with columns: PAN, CTX_KEY, SAF_MSG"
         });
         
     } catch (err) {
@@ -622,31 +610,6 @@ app.get('/api/prm/columns', async (req, res) => {
     }
 });
 
-app.get('/api/upf/tables', async (req, res) => {
-    let connection;
-    try {
-        if (!oracle1Pool || !connectionStatus.upf) {
-            return res.json({ error: 'UPF Database not connected' });
-        }
-        
-        connection = await oracle1Pool.getConnection();
-        const result = await connection.execute(`
-            SELECT table_name FROM user_tables ORDER BY table_name
-        `);
-        
-        const tables = result.rows.map(row => row[0]);
-        res.json({
-            success: true,
-            tables: tables,
-            count: tables.length
-        });
-    } catch (err) {
-        res.json({ error: err.message });
-    } finally {
-        if (connection) await connection.close();
-    }
-});
-
 // Serve HTML page
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
@@ -661,9 +624,12 @@ async function startServer() {
         logToFile(`📱 Open your browser to use the application\n`);
         logToFile(`🔍 Debug Endpoints:`);
         logToFile(`   - PRM Columns: http://localhost:${port}/api/prm/columns`);
-        logToFile(`   - UPF Tables: http://localhost:${port}/api/upf/tables`);
-        logToFile(`   - UPF Columns: http://localhost:${port}/api/upf/debug-columns`);
+        logToFile(`   - EPS Tables: http://localhost:${port}/api/eps/tables`);
         logToFile(`   - Health Check: http://localhost:${port}/api/health\n`);
+        logToFile(`💡 EPS PTLF Parser:`);
+        logToFile(`   - Uses same logic as Java EpsJournalService`);
+        logToFile(`   - Removes ${85} bytes header before parsing (safBeginIndex)`);
+        logToFile(`   - Parses tokens: B0, QP, QS, QC, BE, SN\n`);
     });
 }
 
