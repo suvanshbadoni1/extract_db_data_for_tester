@@ -259,48 +259,210 @@ app.post('/api/prm/query', async (req, res) => {
     }
 });
 
-// Debug: Show sample PANs from UPF
-app.get('/api/upf/sample-pans', async (req, res) => {
+// UPF Query endpoint (Oracle 1) - Handles JSON and XML
+app.post('/api/upf/query', async (req, res) => {
+    const { pan, rrn, stan } = req.body;
     let connection;
+    
+    if (!oracle1Pool || !connectionStatus.upf) {
+        return res.json({
+            success: false,
+            database: 'UPF (Oracle 1)',
+            error: connectionStatus.upfError || 'UPF Database is not connected',
+            data: [],
+            count: 0,
+            connectionError: true,
+            isConnected: false
+        });
+    }
+    
     try {
-        if (!oracle1Pool || !connectionStatus.upf) {
-            return res.json({ error: 'UPF Database not connected' });
-        }
-        
         connection = await oracle1Pool.getConnection();
         
-        // Get 10 sample records with PANs
-        const result = await connection.execute(`
-            SELECT 
-                STAN,
-                MSG_TP,
-                JSON_VALUE(EXT, '$.AccptrCmpltnAdvc.CmpltnAdvc.Envt.Card.PlainCardData.PAN') as PAN_FROM_COMPLTN,
-                JSON_VALUE(EXT, '$.AccptrRjctn.Rjctn.Envt.Card.PlainCardData.PAN') as PAN_FROM_RJCTN,
-                LAST_MODIFIED
-            FROM ep_log 
-            WHERE (JSON_VALUE(EXT, '$.AccptrCmpltnAdvc.CmpltnAdvc.Envt.Card.PlainCardData.PAN') IS NOT NULL
-                   OR JSON_VALUE(EXT, '$.AccptrRjctn.Rjctn.Envt.Card.PlainCardData.PAN') IS NOT NULL)
-            AND ROWNUM <= 10
-            ORDER BY LAST_MODIFIED DESC
-        `);
+        // Build query - for XML we need to use XML functions or LIKE for searching
+        let query = `SELECT * FROM ep_log WHERE 1=1`;
+        const params = {};
         
-        const samples = result.rows.map(row => ({
-            stan: row[0],
-            msg_tp: row[1],
-            pan_compltn: row[2] ? maskPAN(row[2]) : null,
-            pan_rjctn: row[3] ? maskPAN(row[3]) : null,
-            last_modified: row[4]
-        }));
+        // Filter by STAN if provided (direct column)
+        if (stan && stan.trim()) {
+            query += ` AND STAN = :stan`;
+            params.stan = stan;
+        }
+        
+        // For RRN and PAN, we need to search in BOTH JSON and XML
+        // Using LIKE for XML since Oracle XML functions can be complex
+        if (rrn && rrn.trim()) {
+            query += ` AND (`;
+            query += ` JSON_VALUE(EXT, '$.AccptrCmpltnAdvc.CmpltnAdvc.Cntxt.SaleCntxt.SaleRefNb') = :rrn`;
+            query += ` OR EXT LIKE '%<SaleRefNb>%' || :rrn || '%</SaleRefNb>%'`;  // XML search
+            query += ` OR EXT LIKE '%<SaleRefNb>:' || :rrn || '</SaleRefNb>%'`;   // Alternative XML format
+            query += `)`;
+            params.rrn = rrn;
+        }
+        
+        // Filter by PAN if provided (search in both JSON and XML)
+        if (pan && pan.trim()) {
+            const cleanPan = pan.trim();
+            query += ` AND (`;
+            query += ` JSON_VALUE(EXT, '$.AccptrCmpltnAdvc.CmpltnAdvc.Envt.Card.PlainCardData.PAN') = :pan`;
+            query += ` OR JSON_VALUE(EXT, '$.AccptrRjctn.Rjctn.Envt.Card.PlainCardData.PAN') = :pan`;
+            query += ` OR EXT LIKE '%<PAN>%' || :pan || '%</PAN>%'`;  // XML search
+            query += ` OR EXT LIKE '%<PAN>:' || :pan || '</PAN>%'`;    // Alternative XML format
+            query += `)`;
+            params.pan = cleanPan;
+            logToFile(`Searching for PAN: ${maskPAN(cleanPan)}`);
+        }
+        
+        // Order by LAST_MODIFIED - newest first
+        query += ` ORDER BY LAST_MODIFIED DESC`;
+        
+        // Add limit
+        if (Object.keys(params).length === 0) {
+            query += ` FETCH FIRST 100 ROWS ONLY`;
+        } else {
+            query += ` FETCH FIRST 200 ROWS ONLY`;
+        }
+        
+        logToFile(`UPF Query - STAN: ${stan || 'NOT PROVIDED'}, RRN: ${rrn || 'NOT PROVIDED'}, PAN: ${pan ? maskPAN(pan) : 'NOT PROVIDED'}`);
+        
+        const result = await connection.execute(query, params);
+        
+        logToFile(`UPF Query completed - Found ${result.rows.length} records`);
+        
+        // Process results - need to parse BOTH JSON and XML
+        const formattedData = [];
+        const xml2js = require('xml2js'); // You'll need to install this: npm install xml2js
+        
+        for (const row of result.rows) {
+            const record = {};
+            
+            if (result.metaData) {
+                for (let idx = 0; idx < result.metaData.length; idx++) {
+                    const col = result.metaData[idx];
+                    let value = row[idx];
+                    const columnName = col.name;
+                    
+                    if (columnName === 'EXT') {
+                        if (value) {
+                            // Determine if it's JSON or XML
+                            const trimmedValue = value.trim();
+                            const isJson = trimmedValue.startsWith('{') || trimmedValue.startsWith('[');
+                            const isXml = trimmedValue.startsWith('<?xml') || trimmedValue.startsWith('<');
+                            
+                            record.content_type = isJson ? 'json' : (isXml ? 'xml' : 'unknown');
+                            record.raw_content = value;
+                            
+                            try {
+                                if (isJson) {
+                                    // Parse as JSON
+                                    const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+                                    record.parsed_json = parsed;
+                                    
+                                    // Extract from JSON
+                                    if (parsed?.AccptrCmpltnAdvc) {
+                                        record.message_type = 'AccptrCmpltnAdvc';
+                                        const jsonData = parsed.AccptrCmpltnAdvc.CmpltnAdvc;
+                                        record.extracted_rrn = jsonData?.Cntxt?.SaleCntxt?.SaleRefNb;
+                                        record.extracted_pan = jsonData?.Envt?.Card?.PlainCardData?.PAN ? 
+                                            maskPAN(jsonData.Envt.Card.PlainCardData.PAN) : null;
+                                        record.extracted_amount = jsonData?.Cntxt?.SaleCntxt?.Amt;
+                                        record.extracted_currency = jsonData?.Cntxt?.SaleCntxt?.Ccy;
+                                        record.extracted_response_code = jsonData?.Rspn?.RspnCd;
+                                        record.transaction_success = jsonData?.Tx?.TxSucss;
+                                    } 
+                                    else if (parsed?.AccptrRjctn) {
+                                        record.message_type = 'AccptrRjctn';
+                                        const xmlData = parsed.AccptrRjctn.Rjctn;
+                                        record.extracted_rrn = xmlData?.Cntxt?.SaleCntxt?.SaleRefNb;
+                                        record.extracted_pan = xmlData?.Envt?.Card?.PlainCardData?.PAN ?
+                                            maskPAN(xmlData.Envt.Card.PlainCardData.PAN) : null;
+                                        record.extracted_amount = xmlData?.Cntxt?.SaleCntxt?.Amt;
+                                        record.extracted_currency = xmlData?.Cntxt?.SaleCntxt?.Ccy;
+                                        record.extracted_response_code = xmlData?.Rspn?.RspnCd;
+                                        record.rejection_reason = xmlData?.Tx?.FailrRsn;
+                                    }
+                                } 
+                                else if (isXml) {
+                                    // Parse as XML
+                                    const parser = new xml2js.Parser({ explicitArray: false });
+                                    const parsedXml = await parser.parseStringPromise(value);
+                                    record.parsed_xml = parsedXml;
+                                    
+                                    // Extract from XML structure
+                                    const doc = parsedXml?.Document || parsedXml?.ns0?.Document;
+                                    if (doc) {
+                                        if (doc.AccptrCmpltnAdvc) {
+                                            record.message_type = 'AccptrCmpltnAdvc';
+                                            const compltn = doc.AccptrCmpltnAdvc.CmpltnAdvc;
+                                            record.extracted_rrn = compltn?.Cntxt?.SaleCntxt?.SaleRefNb;
+                                            record.extracted_pan = compltn?.Envt?.Card?.PlainCardData?.PAN ?
+                                                maskPAN(compltn.Envt.Card.PlainCardData.PAN) : null;
+                                            record.extracted_amount = compltn?.Cntxt?.SaleCntxt?.Amt;
+                                            record.extracted_currency = compltn?.Cntxt?.SaleCntxt?.Ccy;
+                                            record.extracted_response_code = compltn?.Rspn?.RspnCd;
+                                            record.transaction_success = compltn?.Tx?.TxSucss === 'true';
+                                        }
+                                        else if (doc.AccptrRjctn) {
+                                            record.message_type = 'AccptrRjctn';
+                                            const rjctn = doc.AccptrRjctn.Rjctn;
+                                            record.extracted_rrn = rjctn?.Cntxt?.SaleCntxt?.SaleRefNb;
+                                            record.extracted_pan = rjctn?.Envt?.Card?.PlainCardData?.PAN ?
+                                                maskPAN(rjctn.Envt.Card.PlainCardData.PAN) : null;
+                                            record.extracted_amount = rjctn?.Cntxt?.SaleCntxt?.Amt;
+                                            record.extracted_currency = rjctn?.Cntxt?.SaleCntxt?.Ccy;
+                                            record.extracted_response_code = rjctn?.Rspn?.RspnCd;
+                                            record.rejection_reason = rjctn?.Tx?.FailrRsn;
+                                        }
+                                    }
+                                }
+                            } catch (parseErr) {
+                                record.parse_error = parseErr.message;
+                                logToFile(`Parse error for record: ${parseErr.message}`);
+                            }
+                        }
+                    } else {
+                        // Handle other columns
+                        if ((columnName === 'LAST_MODIFIED' || columnName === 'MSG_RCV_TS' || columnName === 'MSG_SNT_TS' || columnName === 'TXN_DT_TM') && value) {
+                            if (typeof value === 'object' && value.toISOString) {
+                                value = value.toISOString();
+                            }
+                        }
+                        record[columnName] = value;
+                    }
+                }
+            }
+            
+            formattedData.push(record);
+        }
         
         res.json({
             success: true,
-            sample_count: samples.length,
-            samples: samples,
-            note: "PANs are masked for security. Use full PAN value (without masking) when searching."
+            database: 'UPF (Oracle 1)',
+            data: formattedData,
+            count: formattedData.length,
+            search_criteria: {
+                stan_provided: !!(stan && stan.trim()),
+                rrn_provided: !!(rrn && rrn.trim()),
+                pan_provided: !!(pan && pan.trim()),
+                pan_searched: pan ? maskPAN(pan) : null
+            },
+            message_types_found: [...new Set(formattedData.map(r => r.message_type).filter(t => t))],
+            connectionError: false,
+            isConnected: true
         });
         
     } catch (err) {
-        res.json({ error: err.message });
+        logToFile('UPF Query Error: ' + err.message);
+        console.error('Full error:', err);
+        res.json({
+            success: false,
+            database: 'UPF (Oracle 1)',
+            error: err.message,
+            data: [],
+            count: 0,
+            connectionError: false,
+            isConnected: true
+        });
     } finally {
         if (connection) await connection.close();
     }
