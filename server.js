@@ -259,7 +259,7 @@ app.post('/api/prm/query', async (req, res) => {
     }
 });
 
-// UPF Query endpoint (Oracle 1) - FIXED: Search all message types
+// UPF Query endpoint (Oracle 1) - FIXED with correct column names
 app.post('/api/upf/query', async (req, res) => {
     const { pan, rrn, stan } = req.body;
     let connection;
@@ -279,35 +279,38 @@ app.post('/api/upf/query', async (req, res) => {
     try {
         connection = await oracle1Pool.getConnection();
         
-        // BUILD QUERY DYNAMICALLY BASED ON WHAT'S PROVIDED
-        let query = `SELECT * FROM ep_log WHERE 1=1`;  // START WITH ALL RECORDS
+        // Build query dynamically - using actual column names from your table
+        let query = `SELECT * FROM ep_log WHERE 1=1`;
         const params = {};
         
         // Filter by STAN if provided
         if (stan && stan.trim()) {
-            query += ` AND stan = :stan`;
+            query += ` AND STAN = :stan`;
             params.stan = stan;
         }
         
-        // Filter by RRN if provided (search in JSON)
+        // Filter by RRN if provided (search in JSON for both message types)
         if (rrn && rrn.trim()) {
-            query += ` AND (JSON_VALUE(ext, '$.AccptrCmpltnAdvc.CmpltnAdvc.Cntxt.SaleCntxt.SaleRefNb') = :rrn
-                      OR JSON_VALUE(ext, '$.AccptrRjctn.Rjctn.Cntxt.SaleCntxt.SaleRefNb') = :rrn)`;
+            query += ` AND (JSON_VALUE(EXT, '$.AccptrCmpltnAdvc.CmpltnAdvc.Cntxt.SaleCntxt.SaleRefNb') = :rrn
+                      OR JSON_VALUE(EXT, '$.AccptrRjctn.Rjctn.Cntxt.SaleCntxt.SaleRefNb') = :rrn)`;
             params.rrn = rrn;
         }
         
-        // Filter by PAN if provided (search in JSON)
+        // Filter by PAN if provided (search in JSON for both message types)
         if (pan && pan.trim()) {
-            query += ` AND (JSON_VALUE(ext, '$.AccptrCmpltnAdvc.CmpltnAdvc.Envt.Card.PlainCardData.PAN') = :pan
-                      OR JSON_VALUE(ext, '$.AccptrRjctn.Rjctn.Envt.Card.PlainCardData.PAN') = :pan)`;
+            query += ` AND (JSON_VALUE(EXT, '$.AccptrCmpltnAdvc.CmpltnAdvc.Envt.Card.PlainCardData.PAN') = :pan
+                      OR JSON_VALUE(EXT, '$.AccptrRjctn.Rjctn.Envt.Card.PlainCardData.PAN') = :pan)`;
             params.pan = pan;
         }
         
-        // If no filters provided, limit to last 100 records
+        // Order by LAST_MODIFIED (the timestamp column) - newest first
+        query += ` ORDER BY LAST_MODIFIED DESC`;
+        
+        // Add limit to prevent too many records
         if (Object.keys(params).length === 0) {
-            query += ` ORDER BY time_stamp DESC FETCH FIRST 100 ROWS ONLY`;
+            query += ` FETCH FIRST 100 ROWS ONLY`;
         } else {
-            query += ` ORDER BY time_stamp DESC FETCH FIRST 200 ROWS ONLY`;
+            query += ` FETCH FIRST 200 ROWS ONLY`;
         }
         
         logToFile(`UPF Query - STAN: ${stan || 'NOT PROVIDED'}, RRN: ${rrn || 'NOT PROVIDED'}, PAN: ${pan || 'NOT PROVIDED'}`);
@@ -326,15 +329,16 @@ app.post('/api/upf/query', async (req, res) => {
             if (result.metaData) {
                 result.metaData.forEach((col, index) => {
                     let value = row[index];
+                    const columnName = col.name;
                     
-                    if (col.name === 'EXT' || col.name === 'ext') {
+                    if (columnName === 'EXT') {
                         if (value) {
                             try {
                                 const parsed = typeof value === 'string' ? JSON.parse(value) : value;
-                                record[col.name] = parsed;
+                                record[columnName] = parsed;
                                 record.parsed_json = parsed;
                                 
-                                // Determine message type and extract fields accordingly
+                                // Determine message type and extract fields
                                 let msgType = null;
                                 let extractedData = {};
                                 
@@ -374,16 +378,22 @@ app.post('/api/upf/query', async (req, res) => {
                                 if (extractedData.success !== undefined) record.transaction_success = extractedData.success;
                                 
                             } catch (e) {
-                                record[col.name] = value;
+                                record[columnName] = value;
                                 record.json_parse_error = e.message;
                             }
                         }
                     } else {
-                        // Mask PAN if present
-                        if ((col.name === 'PAN' || col.name === 'pan') && value) {
+                        // Format timestamp fields nicely
+                        if ((columnName === 'LAST_MODIFIED' || columnName === 'MSG_RCV_TS' || columnName === 'MSG_SNT_TS' || columnName === 'TXN_DT_TM') && value) {
+                            if (value.toISOString) {
+                                value = value.toISOString();
+                            }
+                        }
+                        // Mask PAN if present (though PAN seems to be in JSON only)
+                        if ((columnName === 'PAN') && value) {
                             value = maskPAN(value);
                         }
-                        record[col.name] = value;
+                        record[columnName] = value;
                     }
                 });
             }
