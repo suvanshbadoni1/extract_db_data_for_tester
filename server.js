@@ -299,7 +299,8 @@ app.get('/api/upf/browse', async (req, res) => {
         if (connection) await connection.close();
     }
 });
-// UPF Query endpoint (Oracle 1) - Handles JSON and XML
+
+// UPF Query endpoint (Oracle 1) - FIXED for your actual data structure
 app.post('/api/upf/query', async (req, res) => {
     const { pan, rrn, stan } = req.body;
     let connection;
@@ -319,59 +320,67 @@ app.post('/api/upf/query', async (req, res) => {
     try {
         connection = await oracle1Pool.getConnection();
         
-        // Build query - for XML we need to use XML functions or LIKE for searching
+        // Build query - using MSG_TP and STAN which are direct columns
         let query = `SELECT * FROM ep_log WHERE 1=1`;
         const params = {};
         
-        // Filter by STAN if provided (direct column)
+        // Filter by STAN if provided (direct column - works!)
         if (stan && stan.trim()) {
             query += ` AND STAN = :stan`;
             params.stan = stan;
+            logToFile(`Searching by STAN: ${stan}`);
         }
         
-        // For RRN and PAN, we need to search in BOTH JSON and XML
-        // Using LIKE for XML since Oracle XML functions can be complex
+        // Filter by RRN - need to search in the EXT content
         if (rrn && rrn.trim()) {
+            // Search for RRN in both JSON and XML formats within the EXT column
             query += ` AND (`;
-            query += ` JSON_VALUE(EXT, '$.AccptrCmpltnAdvc.CmpltnAdvc.Cntxt.SaleCntxt.SaleRefNb') = :rrn`;
-            query += ` OR EXT LIKE '%<SaleRefNb>%' || :rrn || '%</SaleRefNb>%'`;  // XML search
-            query += ` OR EXT LIKE '%<SaleRefNb>:' || :rrn || '</SaleRefNb>%'`;   // Alternative XML format
+            query += ` EXT LIKE '%' || :rrn1 || '%'`;  // Direct string search
+            query += ` OR EXT LIKE '%' || :rrn2 || '%'`;
+            query += ` OR EXT LIKE '%' || :rrn3 || '%'`;
             query += `)`;
-            params.rrn = rrn;
+            params.rrn1 = `"SaleRefNb":"${rrn}"`;      // JSON format
+            params.rrn2 = `>${rrn}<`;                   // XML format  
+            params.rrn3 = rrn;                          // Direct match
+            logToFile(`Searching by RRN: ${rrn}`);
         }
         
-        // Filter by PAN if provided (search in both JSON and XML)
+        // Filter by PAN - search in EXT content
         if (pan && pan.trim()) {
             const cleanPan = pan.trim();
             query += ` AND (`;
-            query += ` JSON_VALUE(EXT, '$.AccptrCmpltnAdvc.CmpltnAdvc.Envt.Card.PlainCardData.PAN') = :pan`;
-            query += ` OR JSON_VALUE(EXT, '$.AccptrRjctn.Rjctn.Envt.Card.PlainCardData.PAN') = :pan`;
-            query += ` OR EXT LIKE '%<PAN>%' || :pan || '%</PAN>%'`;  // XML search
-            query += ` OR EXT LIKE '%<PAN>:' || :pan || '</PAN>%'`;    // Alternative XML format
+            query += ` EXT LIKE '%' || :pan1 || '%'`;
+            query += ` OR EXT LIKE '%' || :pan2 || '%'`;
+            query += ` OR EXT LIKE '%' || :pan3 || '%'`;
             query += `)`;
-            params.pan = cleanPan;
-            logToFile(`Searching for PAN: ${maskPAN(cleanPan)}`);
+            params.pan1 = `"PAN":"${cleanPan}"`;        // JSON format
+            params.pan2 = `>${cleanPan}<`;              // XML format
+            params.pan3 = cleanPan;                      // Direct match
+            logToFile(`Searching by PAN: ${maskPAN(cleanPan)}`);
         }
         
-        // Order by LAST_MODIFIED - newest first
+        // Add ORDER BY and LIMIT
         query += ` ORDER BY LAST_MODIFIED DESC`;
         
-        // Add limit
         if (Object.keys(params).length === 0) {
-            query += ` FETCH FIRST 100 ROWS ONLY`;
+            query += ` FETCH FIRST 50 ROWS ONLY`;
         } else {
             query += ` FETCH FIRST 200 ROWS ONLY`;
         }
         
-        logToFile(`UPF Query - STAN: ${stan || 'NOT PROVIDED'}, RRN: ${rrn || 'NOT PROVIDED'}, PAN: ${pan ? maskPAN(pan) : 'NOT PROVIDED'}`);
+        // Log the query
+        logToFile(`\n🔍 UPF Query:`);
+        logToFile(`SQL: ${query}`);
+        logToFile(`Params: ${JSON.stringify(params, (key, val) => {
+            if (key.includes('pan') && val) return maskPAN(val);
+            return val;
+        })}`);
         
         const result = await connection.execute(query, params);
+        logToFile(`Found ${result.rows.length} records`);
         
-        logToFile(`UPF Query completed - Found ${result.rows.length} records`);
-        
-        // Process results - need to parse BOTH JSON and XML
+        // Process results
         const formattedData = [];
-        const xml2js = require('xml2js'); // You'll need to install this: npm install xml2js
         
         for (const row of result.rows) {
             const record = {};
@@ -384,90 +393,95 @@ app.post('/api/upf/query', async (req, res) => {
                     
                     if (columnName === 'EXT') {
                         if (value) {
-                            // Determine if it's JSON or XML
-                            const trimmedValue = value.trim();
-                            const isJson = trimmedValue.startsWith('{') || trimmedValue.startsWith('[');
+                            // Clean up the value - remove surrounding quotes if present
+                            let cleanValue = value;
+                            if (typeof cleanValue === 'string') {
+                                // Remove surrounding double quotes if they exist
+                                if (cleanValue.startsWith('"') && cleanValue.endsWith('"')) {
+                                    cleanValue = cleanValue.slice(1, -1);
+                                    // Unescape internal quotes
+                                    cleanValue = cleanValue.replace(/\\"/g, '"');
+                                }
+                            }
+                            
+                            record.raw_ext = cleanValue;
+                            
+                            // Determine content type
+                            const trimmedValue = cleanValue.trim();
+                            const isJson = trimmedValue.startsWith('{');
                             const isXml = trimmedValue.startsWith('<?xml') || trimmedValue.startsWith('<');
+                            record.content_format = isJson ? 'json' : (isXml ? 'xml' : 'unknown');
                             
-                            record.content_type = isJson ? 'json' : (isXml ? 'xml' : 'unknown');
-                            record.raw_content = value;
-                            
+                            // Try to parse based on format
                             try {
                                 if (isJson) {
                                     // Parse as JSON
-                                    const parsed = typeof value === 'string' ? JSON.parse(value) : value;
-                                    record.parsed_json = parsed;
+                                    const parsed = JSON.parse(cleanValue);
+                                    record.parsed_content = parsed;
                                     
-                                    // Extract from JSON
-                                    if (parsed?.AccptrCmpltnAdvc) {
+                                    // Extract fields based on message type
+                                    if (parsed.AccptrCmpltnAdvc) {
                                         record.message_type = 'AccptrCmpltnAdvc';
-                                        const jsonData = parsed.AccptrCmpltnAdvc.CmpltnAdvc;
-                                        record.extracted_rrn = jsonData?.Cntxt?.SaleCntxt?.SaleRefNb;
-                                        record.extracted_pan = jsonData?.Envt?.Card?.PlainCardData?.PAN ? 
-                                            maskPAN(jsonData.Envt.Card.PlainCardData.PAN) : null;
-                                        record.extracted_amount = jsonData?.Cntxt?.SaleCntxt?.Amt;
-                                        record.extracted_currency = jsonData?.Cntxt?.SaleCntxt?.Ccy;
-                                        record.extracted_response_code = jsonData?.Rspn?.RspnCd;
-                                        record.transaction_success = jsonData?.Tx?.TxSucss;
+                                        const data = parsed.AccptrCmpltnAdvc.CmpltnAdvc;
+                                        record.extracted_rrn = data?.Cntxt?.SaleCntxt?.SaleRefNb;
+                                        record.extracted_pan = data?.Envt?.Card?.PlainCardData?.PAN ? 
+                                            maskPAN(data.Envt.Card.PlainCardData.PAN) : null;
+                                        record.extracted_amount = data?.Cntxt?.SaleCntxt?.Amt;
+                                        record.extracted_currency = data?.Cntxt?.SaleCntxt?.Ccy;
+                                        record.extracted_response_code = data?.Rspn?.RspnCd;
                                     } 
-                                    else if (parsed?.AccptrRjctn) {
+                                    else if (parsed.AccptrCmpltnAdvcRspn) {
+                                        record.message_type = 'AccptrCmpltnAdvcRspn';
+                                        const data = parsed.AccptrCmpltnAdvcRspn.CmpltnAdvcRspn;
+                                        record.extracted_rrn = data?.Cntxt?.SaleCntxt?.SaleRefNb;
+                                        record.extracted_pan = data?.Envt?.Card?.PlainCardData?.PAN ?
+                                            maskPAN(data.Envt.Card.PlainCardData.PAN) : null;
+                                    }
+                                    else if (parsed.AccptrRjctn) {
                                         record.message_type = 'AccptrRjctn';
-                                        const xmlData = parsed.AccptrRjctn.Rjctn;
-                                        record.extracted_rrn = xmlData?.Cntxt?.SaleCntxt?.SaleRefNb;
-                                        record.extracted_pan = xmlData?.Envt?.Card?.PlainCardData?.PAN ?
-                                            maskPAN(xmlData.Envt.Card.PlainCardData.PAN) : null;
-                                        record.extracted_amount = xmlData?.Cntxt?.SaleCntxt?.Amt;
-                                        record.extracted_currency = xmlData?.Cntxt?.SaleCntxt?.Ccy;
-                                        record.extracted_response_code = xmlData?.Rspn?.RspnCd;
-                                        record.rejection_reason = xmlData?.Tx?.FailrRsn;
+                                        const data = parsed.AccptrRjctn.Rjctn;
+                                        record.extracted_rrn = data?.Cntxt?.SaleCntxt?.SaleRefNb;
+                                        record.extracted_pan = data?.Envt?.Card?.PlainCardData?.PAN ?
+                                            maskPAN(data.Envt.Card.PlainCardData.PAN) : null;
+                                        record.rejection_reason = data?.Tx?.FailrRsn;
                                     }
                                 } 
                                 else if (isXml) {
-                                    // Parse as XML
-                                    const parser = new xml2js.Parser({ explicitArray: false });
-                                    const parsedXml = await parser.parseStringPromise(value);
-                                    record.parsed_xml = parsedXml;
+                                    record.message_type = record.msg_tp || 'XML_Content';
+                                    record.xml_content = cleanValue;
                                     
-                                    // Extract from XML structure
-                                    const doc = parsedXml?.Document || parsedXml?.ns0?.Document;
-                                    if (doc) {
-                                        if (doc.AccptrCmpltnAdvc) {
-                                            record.message_type = 'AccptrCmpltnAdvc';
-                                            const compltn = doc.AccptrCmpltnAdvc.CmpltnAdvc;
-                                            record.extracted_rrn = compltn?.Cntxt?.SaleCntxt?.SaleRefNb;
-                                            record.extracted_pan = compltn?.Envt?.Card?.PlainCardData?.PAN ?
-                                                maskPAN(compltn.Envt.Card.PlainCardData.PAN) : null;
-                                            record.extracted_amount = compltn?.Cntxt?.SaleCntxt?.Amt;
-                                            record.extracted_currency = compltn?.Cntxt?.SaleCntxt?.Ccy;
-                                            record.extracted_response_code = compltn?.Rspn?.RspnCd;
-                                            record.transaction_success = compltn?.Tx?.TxSucss === 'true';
-                                        }
-                                        else if (doc.AccptrRjctn) {
-                                            record.message_type = 'AccptrRjctn';
-                                            const rjctn = doc.AccptrRjctn.Rjctn;
-                                            record.extracted_rrn = rjctn?.Cntxt?.SaleCntxt?.SaleRefNb;
-                                            record.extracted_pan = rjctn?.Envt?.Card?.PlainCardData?.PAN ?
-                                                maskPAN(rjctn.Envt.Card.PlainCardData.PAN) : null;
-                                            record.extracted_amount = rjctn?.Cntxt?.SaleCntxt?.Amt;
-                                            record.extracted_currency = rjctn?.Cntxt?.SaleCntxt?.Ccy;
-                                            record.extracted_response_code = rjctn?.Rspn?.RspnCd;
-                                            record.rejection_reason = rjctn?.Tx?.FailrRsn;
-                                        }
-                                    }
+                                    // Extract using regex for XML
+                                    const panMatch = cleanValue.match(/<PAN>([^<]+)<\/PAN>/);
+                                    if (panMatch) record.extracted_pan = maskPAN(panMatch[1]);
+                                    
+                                    const rrnMatch = cleanValue.match(/<SaleRefNb>([^<]+)<\/SaleRefNb>/);
+                                    if (rrnMatch) record.extracted_rrn = rrnMatch[1];
+                                    
+                                    const amountMatch = cleanValue.match(/<TtlAmt>([^<]+)<\/TtlAmt>/);
+                                    if (amountMatch) record.extracted_amount = amountMatch[1];
                                 }
                             } catch (parseErr) {
                                 record.parse_error = parseErr.message;
-                                logToFile(`Parse error for record: ${parseErr.message}`);
+                                // Still try regex extraction as fallback
+                                const panMatch = cleanValue.match(/PAN["':\s>]+([0-9]{15,19})/);
+                                if (panMatch) record.extracted_pan = maskPAN(panMatch[1]);
+                                
+                                const rrnMatch = cleanValue.match(/(?:SaleRefNb|SaleRefNb)[":\s>]+([0-9A-Za-z]+)/);
+                                if (rrnMatch) record.extracted_rrn = rrnMatch[1];
                             }
                         }
                     } else {
                         // Handle other columns
-                        if ((columnName === 'LAST_MODIFIED' || columnName === 'MSG_RCV_TS' || columnName === 'MSG_SNT_TS' || columnName === 'TXN_DT_TM') && value) {
-                            if (typeof value === 'object' && value.toISOString) {
-                                value = value.toISOString();
-                            }
+                        if (columnName === 'STAN' && value) {
+                            record.stan = value;
+                        } else if (columnName === 'MSG_TP') {
+                            if (!record.message_type && value) record.message_type = value;
+                            record.msg_tp = value;
+                        } else if (columnName === 'LAST_MODIFIED' && value) {
+                            record.last_modified = value;
+                        } else {
+                            record[columnName] = value;
                         }
-                        record[columnName] = value;
                     }
                 }
             }
@@ -481,10 +495,9 @@ app.post('/api/upf/query', async (req, res) => {
             data: formattedData,
             count: formattedData.length,
             search_criteria: {
-                stan_provided: !!(stan && stan.trim()),
-                rrn_provided: !!(rrn && rrn.trim()),
-                pan_provided: !!(pan && pan.trim()),
-                pan_searched: pan ? maskPAN(pan) : null
+                stan: stan || null,
+                rrn: rrn || null,
+                pan: pan ? maskPAN(pan) : null
             },
             message_types_found: [...new Set(formattedData.map(r => r.message_type).filter(t => t))],
             connectionError: false,
@@ -492,8 +505,8 @@ app.post('/api/upf/query', async (req, res) => {
         });
         
     } catch (err) {
-        logToFile('UPF Query Error: ' + err.message);
-        console.error('Full error:', err);
+        logToFile('❌ UPF Query Error: ' + err.message);
+        console.error(err);
         res.json({
             success: false,
             database: 'UPF (Oracle 1)',
