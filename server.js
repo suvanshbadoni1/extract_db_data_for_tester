@@ -259,174 +259,48 @@ app.post('/api/prm/query', async (req, res) => {
     }
 });
 
-// UPF Query endpoint (Oracle 1) - FIXED with correct column names
-app.post('/api/upf/query', async (req, res) => {
-    const { pan, rrn, stan } = req.body;
+// Debug: Show sample PANs from UPF
+app.get('/api/upf/sample-pans', async (req, res) => {
     let connection;
-    
-    if (!oracle1Pool || !connectionStatus.upf) {
-        return res.json({
-            success: false,
-            database: 'UPF (Oracle 1)',
-            error: connectionStatus.upfError || 'UPF Database is not connected',
-            data: [],
-            count: 0,
-            connectionError: true,
-            isConnected: false
-        });
-    }
-    
     try {
+        if (!oracle1Pool || !connectionStatus.upf) {
+            return res.json({ error: 'UPF Database not connected' });
+        }
+        
         connection = await oracle1Pool.getConnection();
         
-        // Build query dynamically - using actual column names from your table
-        let query = `SELECT * FROM ep_log WHERE 1=1`;
-        const params = {};
+        // Get 10 sample records with PANs
+        const result = await connection.execute(`
+            SELECT 
+                STAN,
+                MSG_TP,
+                JSON_VALUE(EXT, '$.AccptrCmpltnAdvc.CmpltnAdvc.Envt.Card.PlainCardData.PAN') as PAN_FROM_COMPLTN,
+                JSON_VALUE(EXT, '$.AccptrRjctn.Rjctn.Envt.Card.PlainCardData.PAN') as PAN_FROM_RJCTN,
+                LAST_MODIFIED
+            FROM ep_log 
+            WHERE (JSON_VALUE(EXT, '$.AccptrCmpltnAdvc.CmpltnAdvc.Envt.Card.PlainCardData.PAN') IS NOT NULL
+                   OR JSON_VALUE(EXT, '$.AccptrRjctn.Rjctn.Envt.Card.PlainCardData.PAN') IS NOT NULL)
+            AND ROWNUM <= 10
+            ORDER BY LAST_MODIFIED DESC
+        `);
         
-        // Filter by STAN if provided
-        if (stan && stan.trim()) {
-            query += ` AND STAN = :stan`;
-            params.stan = stan;
-        }
-        
-        // Filter by RRN if provided (search in JSON for both message types)
-        if (rrn && rrn.trim()) {
-            query += ` AND (JSON_VALUE(EXT, '$.AccptrCmpltnAdvc.CmpltnAdvc.Cntxt.SaleCntxt.SaleRefNb') = :rrn
-                      OR JSON_VALUE(EXT, '$.AccptrRjctn.Rjctn.Cntxt.SaleCntxt.SaleRefNb') = :rrn)`;
-            params.rrn = rrn;
-        }
-        
-        // Filter by PAN if provided (search in JSON for both message types)
-        if (pan && pan.trim()) {
-            query += ` AND (JSON_VALUE(EXT, '$.AccptrCmpltnAdvc.CmpltnAdvc.Envt.Card.PlainCardData.PAN') = :pan
-                      OR JSON_VALUE(EXT, '$.AccptrRjctn.Rjctn.Envt.Card.PlainCardData.PAN') = :pan)`;
-            params.pan = pan;
-        }
-        
-        // Order by LAST_MODIFIED (the timestamp column) - newest first
-        query += ` ORDER BY LAST_MODIFIED DESC`;
-        
-        // Add limit to prevent too many records
-        if (Object.keys(params).length === 0) {
-            query += ` FETCH FIRST 100 ROWS ONLY`;
-        } else {
-            query += ` FETCH FIRST 200 ROWS ONLY`;
-        }
-        
-        logToFile(`UPF Query - STAN: ${stan || 'NOT PROVIDED'}, RRN: ${rrn || 'NOT PROVIDED'}, PAN: ${pan || 'NOT PROVIDED'}`);
-        logToFile(`UPF Query SQL: ${query}`);
-        
-        const result = await connection.execute(query, params);
-        
-        logToFile(`UPF Query completed - Found ${result.rows.length} records`);
-        
-        // Process results
-        const formattedData = [];
-        
-        for (const row of result.rows) {
-            const record = {};
-            
-            if (result.metaData) {
-                result.metaData.forEach((col, index) => {
-                    let value = row[index];
-                    const columnName = col.name;
-                    
-                    if (columnName === 'EXT') {
-                        if (value) {
-                            try {
-                                const parsed = typeof value === 'string' ? JSON.parse(value) : value;
-                                record[columnName] = parsed;
-                                record.parsed_json = parsed;
-                                
-                                // Determine message type and extract fields
-                                let msgType = null;
-                                let extractedData = {};
-                                
-                                if (parsed?.AccptrCmpltnAdvc) {
-                                    msgType = 'AccptrCmpltnAdvc';
-                                    extractedData = {
-                                        rrn: parsed.AccptrCmpltnAdvc?.CmpltnAdvc?.Cntxt?.SaleCntxt?.SaleRefNb,
-                                        pan: parsed.AccptrCmpltnAdvc?.CmpltnAdvc?.Envt?.Card?.PlainCardData?.PAN,
-                                        amount: parsed.AccptrCmpltnAdvc?.CmpltnAdvc?.Cntxt?.SaleCntxt?.Amt,
-                                        currency: parsed.AccptrCmpltnAdvc?.CmpltnAdvc?.Cntxt?.SaleCntxt?.Ccy,
-                                        responseCode: parsed.AccptrCmpltnAdvc?.CmpltnAdvc?.Rspn?.RspnCd,
-                                        responseMsg: parsed.AccptrCmpltnAdvc?.CmpltnAdvc?.Rspn?.RspnMsg,
-                                        success: parsed.AccptrCmpltnAdvc?.CmpltnAdvc?.Tx?.TxSucss
-                                    };
-                                } 
-                                else if (parsed?.AccptrRjctn) {
-                                    msgType = 'AccptrRjctn';
-                                    extractedData = {
-                                        rrn: parsed.AccptrRjctn?.Rjctn?.Cntxt?.SaleCntxt?.SaleRefNb,
-                                        pan: parsed.AccptrRjctn?.Rjctn?.Envt?.Card?.PlainCardData?.PAN,
-                                        amount: parsed.AccptrRjctn?.Rjctn?.Cntxt?.SaleCntxt?.Amt,
-                                        currency: parsed.AccptrRjctn?.Rjctn?.Cntxt?.SaleCntxt?.Ccy,
-                                        responseCode: parsed.AccptrRjctn?.Rjctn?.Rspn?.RspnCd,
-                                        rejectionReason: parsed.AccptrRjctn?.Rjctn?.Tx?.FailrRsn,
-                                        rejectionMsg: parsed.AccptrRjctn?.Rjctn?.Rspn?.RspnMsg
-                                    };
-                                }
-                                
-                                record.message_type = msgType;
-                                if (extractedData.rrn) record.extracted_rrn = extractedData.rrn;
-                                if (extractedData.pan) record.extracted_pan = maskPAN(extractedData.pan);
-                                if (extractedData.amount) record.extracted_amount = extractedData.amount;
-                                if (extractedData.currency) record.extracted_currency = extractedData.currency;
-                                if (extractedData.responseCode) record.extracted_response_code = extractedData.responseCode;
-                                if (extractedData.responseMsg) record.extracted_response_msg = extractedData.responseMsg;
-                                if (extractedData.rejectionReason) record.rejection_reason = extractedData.rejectionReason;
-                                if (extractedData.success !== undefined) record.transaction_success = extractedData.success;
-                                
-                            } catch (e) {
-                                record[columnName] = value;
-                                record.json_parse_error = e.message;
-                            }
-                        }
-                    } else {
-                        // Format timestamp fields nicely
-                        if ((columnName === 'LAST_MODIFIED' || columnName === 'MSG_RCV_TS' || columnName === 'MSG_SNT_TS' || columnName === 'TXN_DT_TM') && value) {
-                            if (value.toISOString) {
-                                value = value.toISOString();
-                            }
-                        }
-                        // Mask PAN if present (though PAN seems to be in JSON only)
-                        if ((columnName === 'PAN') && value) {
-                            value = maskPAN(value);
-                        }
-                        record[columnName] = value;
-                    }
-                });
-            }
-            
-            formattedData.push(record);
-        }
+        const samples = result.rows.map(row => ({
+            stan: row[0],
+            msg_tp: row[1],
+            pan_compltn: row[2] ? maskPAN(row[2]) : null,
+            pan_rjctn: row[3] ? maskPAN(row[3]) : null,
+            last_modified: row[4]
+        }));
         
         res.json({
             success: true,
-            database: 'UPF (Oracle 1)',
-            data: formattedData,
-            count: formattedData.length,
-            search_criteria: {
-                stan_provided: !!(stan && stan.trim()),
-                rrn_provided: !!(rrn && rrn.trim()),
-                pan_provided: !!(pan && pan.trim())
-            },
-            message_types_found: [...new Set(formattedData.map(r => r.message_type).filter(t => t))],
-            connectionError: false,
-            isConnected: true
+            sample_count: samples.length,
+            samples: samples,
+            note: "PANs are masked for security. Use full PAN value (without masking) when searching."
         });
         
     } catch (err) {
-        logToFile('UPF Query Error: ' + err.message);
-        res.json({
-            success: false,
-            database: 'UPF (Oracle 1)',
-            error: err.message,
-            data: [],
-            count: 0,
-            connectionError: false,
-            isConnected: true
-        });
+        res.json({ error: err.message });
     } finally {
         if (connection) await connection.close();
     }
