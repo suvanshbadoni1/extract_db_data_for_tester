@@ -258,7 +258,47 @@ app.post('/api/prm/query', async (req, res) => {
         });
     }
 });
-
+// Simple endpoint to browse UPF data
+app.get('/api/upf/browse', async (req, res) => {
+    let connection;
+    const limit = parseInt(req.query.limit) || 20;
+    
+    try {
+        if (!oracle1Pool || !connectionStatus.upf) {
+            return res.json({ error: 'UPF Database not connected' });
+        }
+        
+        connection = await oracle1Pool.getConnection();
+        
+        // Get latest records
+        const result = await connection.execute(`
+            SELECT STAN, MSG_TP, 
+                   SUBSTR(EXT, 1, 300) as EXT_PREVIEW,
+                   LAST_MODIFIED
+            FROM ep_log 
+            ORDER BY LAST_MODIFIED DESC 
+            FETCH FIRST ${limit} ROWS ONLY
+        `);
+        
+        const records = result.rows.map(row => ({
+            stan: row[0],
+            msg_tp: row[1],
+            ext_preview: row[2],
+            last_modified: row[3]
+        }));
+        
+        res.json({
+            success: true,
+            total_showing: records.length,
+            records: records
+        });
+        
+    } catch (err) {
+        res.json({ error: err.message });
+    } finally {
+        if (connection) await connection.close();
+    }
+});
 // UPF Query endpoint (Oracle 1) - Handles JSON and XML
 app.post('/api/upf/query', async (req, res) => {
     const { pan, rrn, stan } = req.body;
