@@ -10,7 +10,17 @@ const fs = require('fs');
 const { parseWithTokensToMap, maskPAN } = require('./ptlf-parser');
 
 const app = express();
-const port = process.env.PORT || 4000;
+
+/**
+ * Resolve the application port from the environment or use the project default.
+ * @returns {number} The server port to listen on.
+ */
+function getServerPort() {
+    const envPort = Number.parseInt(process.env.PORT, 10);
+    return Number.isFinite(envPort) && envPort > 0 ? envPort : 4000;
+}
+
+const port = getServerPort();
 
 // Create logs directory if it doesn't exist
 const logsDir = './logs';
@@ -18,7 +28,10 @@ if (!fs.existsSync(logsDir)) {
     fs.mkdirSync(logsDir);
 }
 
-// Simple logging function
+/**
+ * Write a timestamped message to the app log and console.
+ * @param {string} message - The message to write.
+ */
 function logToFile(message) {
     const timestamp = new Date().toISOString();
     const logMessage = `${timestamp} - ${message}\n`;
@@ -91,7 +104,10 @@ let connectionStatus = {
     epsError: null
 };
 
-// Initialize connections
+/**
+ * Initialize all configured database pools and store their statuses.
+ * @returns {Promise<void>} Resolves once each database connection attempt completes.
+ */
 async function initializeDatabases() {
     logToFile('\n🔌 Initializing Database Connections...\n');
     
@@ -767,7 +783,10 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Start server
+/**
+ * Start the HTTP server and initialize database connectivity.
+ * @returns {Promise<void>} Resolves after the server starts listening.
+ */
 async function startServer() {
     await initializeDatabases();
     
@@ -785,4 +804,15 @@ async function startServer() {
     });
 }
 
-startServer();
+if (require.main === module) {
+    startServer();
+}
+
+module.exports = {
+    app,
+    getServerPort,
+    initializeDatabases,
+    startServer,
+    logToFile,
+    port
+};

@@ -10,7 +10,11 @@ const logger = {
 };
 
 /**
- * Get fixed field from token value by position
+ * Return a substring slice from a token value using a fixed start/end range.
+ * @param {string} tokenValue - The token payload to inspect.
+ * @param {number} startPos - Start index (inclusive).
+ * @param {number} endPos - End index (exclusive).
+ * @returns {string} The extracted field value.
  */
 function getFixedField(tokenValue, startPos, endPos) {
     if (!tokenValue || tokenValue.length === 0) {
@@ -26,7 +30,9 @@ function getFixedField(tokenValue, startPos, endPos) {
 }
 
 /**
- * Strip leading zeros from a string
+ * Remove leading zeros while preserving an all-zero value.
+ * @param {string} s - Input string to normalize.
+ * @returns {string|undefined} The normalized string.
  */
 function stripLeadingZeros(s) {
     if (!s) return s;
@@ -34,7 +40,9 @@ function stripLeadingZeros(s) {
 }
 
 /**
- * Parse token data from the main token section
+ * Parse the main PTLF token section into a flat token map.
+ * @param {string} tokenString - Raw token data section.
+ * @returns {Object.<string, string>} Parsed token values keyed by token name.
  */
 function parseTokenData(tokenString) {
     const tokensMap = {};
@@ -57,7 +65,9 @@ function parseTokenData(tokenString) {
 }
 
 /**
- * Parse individual tokens recursively
+ * Recursively walk the token section and store each token by name.
+ * @param {string} tokensStr - Remaining token string to parse.
+ * @param {Object.<string, string>} tokensMap - Target map for parsed values.
  */
 function parseTokens(tokensStr, tokensMap) {
     if (!tokensStr || tokensStr.trim().length === 0) return;
@@ -88,7 +98,9 @@ function parseTokens(tokensStr, tokensMap) {
 }
 
 /**
- * Parse SN token tags
+ * Parse SN sub-token values from the SN token payload.
+ * @param {string} tokenSn - Raw SN token value.
+ * @returns {Object.<string, string>} Parsed SN tags.
  */
 function parseSnTokenTags(tokenSn) {
     const tokensMap = {};
@@ -104,7 +116,9 @@ function parseSnTokenTags(tokenSn) {
 }
 
 /**
- * Parse SN tokens recursively
+ * Recursively parse individual SN tag values.
+ * @param {string} tokensStr - Remaining SN token payload.
+ * @param {Object.<string, string>} tokensMap - Target map for SN fields.
  */
 function parseSnTokens(tokensStr, tokensMap) {
     if (!tokensStr || tokensStr.trim().length === 0) return;
@@ -131,7 +145,9 @@ function parseSnTokens(tokensStr, tokensMap) {
 }
 
 /**
- * Parse B0 token tags (BNET format)
+ * Parse the B0/BNET token values used for basic transaction metadata.
+ * @param {string} tokenB0 - Raw B0 token string.
+ * @returns {Object.<string, string>} Parsed B0 metadata values.
  */
 function parseB0TokenTags(tokenB0) {
     const tokensMap = {};
@@ -168,7 +184,9 @@ function parseB0TokenTags(tokenB0) {
 }
 
 /**
- * Parse QP token tags (ISO8583 fields)
+ * Parse the QP token values for core ISO8583 data elements.
+ * @param {string} tokenQP - Raw QP token content.
+ * @returns {Object.<string, string>} Parsed ISO field values.
  */
 function parseQPTokenTags(tokenQP) {
     const tokensMap = {};
@@ -225,7 +243,9 @@ function parseQPTokenTags(tokenQP) {
 }
 
 /**
- * Parse QS token tags (Timing data)
+ * Parse the QS token values for timing information.
+ * @param {string} tokenQS - Raw QS token content.
+ * @returns {Object.<string, string>} Parsed timing values.
  */
 function parseQSTokenTags(tokenQS) {
     const tokensMap = {};
@@ -254,7 +274,9 @@ function parseQSTokenTags(tokenQS) {
 }
 
 /**
- * Parse QC token tags (Variable length fields)
+ * Parse the QC token values for variable-length fields.
+ * @param {string} tokenQC - Raw QC token content.
+ * @returns {Object.<string, string>} Parsed variable-length field values.
  */
 function parseQCTokenTags(tokenQC) {
     const tokensMap = {};
@@ -283,7 +305,9 @@ function parseQCTokenTags(tokenQC) {
 }
 
 /**
- * Parse BE token tags (Currency conversion)
+ * Parse the BE token values for conversion and currency details.
+ * @param {string} tokenBe - Raw BE token content.
+ * @returns {Object.<string, string>} Parsed currency conversion data.
  */
 function parseBeTokenTags(tokenBe) {
     const tokensMap = {};
@@ -312,7 +336,9 @@ function parseBeTokenTags(tokenBe) {
 }
 
 /**
- * Mask PAN (show first 6 and last 4)
+ * Mask a PAN for display by keeping the first 6 and last 4 digits visible.
+ * @param {string|number} pan - Raw PAN value.
+ * @returns {string|number|undefined} Masked PAN or original value when too short.
  */
 function maskPAN(pan) {
     if (!pan || pan.length < 10) return pan;
@@ -322,12 +348,11 @@ function maskPAN(pan) {
 }
 
 /**
- * Main PTLF Record Parser - parses complete PTLF record
- * Similar to Java's ptlfxParser.parseWithTokensToMap()
- * 
- * @param {string} recordData - Raw PTLF record data (already stripped of header)
- * @param {number} fixedLengthBeforeTokens - Fixed length before token section (default: 85 from their code)
- * @returns {object} Parsed record with all tokens extracted as a flat map
+ * Parse a full PTLF record and flatten token values into a single object.
+ * This mirrors the Java parser pattern used for EpsJournalService.
+ * @param {string} recordData - Raw PTLF record payload after the header.
+ * @param {number} [fixedLengthBeforeTokens=85] - Fixed-length header region before the token section.
+ * @returns {Object.<string, any>} Flattened PTLF fields and metadata.
  */
 function parseWithTokensToMap(recordData, fixedLengthBeforeTokens = 85) {
     const resultMap = {};
