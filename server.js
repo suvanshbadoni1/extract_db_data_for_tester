@@ -10,7 +10,7 @@ const fs = require('fs');
 const { parseWithTokensToMap, maskPAN } = require('./ptlf-parser');
 
 const app = express();
-const port = process.env.PORT || 3000;
+const port = process.env.PORT || 4000;
 
 // Create logs directory if it doesn't exist
 const logsDir = './logs';
